@@ -1,0 +1,259 @@
+---
+title: "Gradio client"
+description: "Use the Gradio Python client to call h2oGPT APIs directly without going through the OpenAI proxy. Supports streaming, document Q&A, summarization, extraction, image understanding, and more."
+---
+
+## Overview
+
+`generate.py` runs a Gradio server alongside the OpenAI-compatible server. Any UI element with an `api_name` defined in `gradio_runner.py` is callable from the Gradio client.
+
+h2oGPT provides two ways to use the Gradio API:
+
+- **Native Gradio client** — the standard `gradio_client` package.
+- **h2oGPT wrapper (`GradioClient`)** — adds exception handling and h2oGPT-specific convenience methods.
+
+The Gradio server runs on port `7860` by default.
+
+## Installation
+
+<CodeGroup>
+
+```bash conda
+conda create -n gradioclient -y
+conda activate gradioclient
+conda install python=3.10 -y
+pip install gradio_client==0.6.1
+```
+
+```bash pip
+pip install gradio_client==0.6.1
+```
+
+</CodeGroup>
+
+To use the `GradioClient` wrapper, download the module from the repository:
+
+```bash
+wget https://raw.githubusercontent.com/h2oai/h2ogpt/main/gradio_utils/grclient.py
+mkdir -p gradio_utils
+mv grclient.py gradio_utils/
+```
+
+## Connecting
+
+```python
+from gradio_client import Client
+
+HOST_URL = "http://localhost:7860"
+client = Client(HOST_URL)
+```
+
+With username/password authentication:
+
+```python
+client = Client("http://localhost:7860", auth=("user", "pass"))
+```
+
+---
+
+## Basic chat
+
+The primary API endpoint is `/submit_nochat_api`. It accepts a string representation of a Python dict and returns one as well.
+
+```python
+from gradio_client import Client
+import ast
+
+HOST_URL = "http://localhost:7860"
+client = Client(HOST_URL)
+
+kwargs = dict(instruction_nochat="Who are you?")
+res = client.predict(str(dict(kwargs)), api_name="/submit_nochat_api")
+
+response = ast.literal_eval(res)["response"]
+print(response)
+```
+
+## Streaming chat
+
+```python
+from gradio_client import Client
+import ast
+import time
+
+HOST = "http://localhost:7860"
+client = Client(HOST)
+api_name = "/submit_nochat_api"
+prompt = "Who are you?"
+kwargs = dict(instruction_nochat=prompt, stream_output=True)
+
+job = client.submit(str(dict(kwargs)), api_name=api_name)
+
+text_old = ""
+while not job.done():
+    outputs_list = job.communicator.job.outputs
+    if outputs_list:
+        res = job.communicator.job.outputs[-1]
+        res_dict = ast.literal_eval(res)
+        text = res_dict["response"]
+        new_text = text[len(text_old):]
+        if new_text:
+            print(new_text, end="", flush=True)
+            text_old = text
+    time.sleep(0.01)
+
+# handle final response in case streaming never triggered
+res_final = job.outputs()
+if res_final:
+    res = res_final[-1]
+    res_dict = ast.literal_eval(res)
+    text = res_dict["response"]
+    print(text[len(text_old):])
+```
+
+---
+
+## Document Q&A, summarization, and extraction
+
+The `GradioClient` wrapper exposes high-level methods for common tasks:
+
+```python
+from gradio_utils.grclient import GradioClient
+
+client = GradioClient("http://localhost:7860")
+
+url = "https://cdn.openai.com/papers/whisper.pdf"
+
+# LLM-only query (no documents)
+print(client.question("Who are you?"))
+
+# Document Q&A — retrieves top-k relevant chunks and answers
+print(client.query("What is whisper?", url=url))
+
+# Summarization — uses map_reduce over all pages when top_k_docs=-1
+print(client.summarize("What is whisper?", url=url, top_k_docs=3))
+
+# Extraction — runs per page, returns bullet points
+print(client.extract("Give bullet points for all key points", url=url, top_k_docs=3))
+```
+
+For an external h2oGPT instance with an API key:
+
+```python
+import os
+from gradio_utils.grclient import GradioClient
+
+h2ogpt_key = os.getenv("H2OGPT_KEY")
+client = GradioClient("https://gpt.h2o.ai", h2ogpt_key=h2ogpt_key)
+
+print(client.question("What models do you support?"))
+```
+
+---
+
+## Image understanding
+
+### Using a URL
+
+```python
+import ast
+from gradio_client import Client
+
+client = Client("http://localhost:7860", auth=("user", "pass"))
+
+h2ogpt_key = "EMPTY"
+
+kwargs = dict(
+    visible_models="THUDM/cogvlm2-llama3-chat-19B",
+    instruction_nochat="Describe the image",
+    h2ogpt_key=h2ogpt_key,
+    stream_output=False,
+    image_file="https://raw.githubusercontent.com/open-mmlab/mmdeploy/main/tests/data/tiger.jpeg",
+    temperature=0,
+    max_tokens=4000,
+)
+res = client.predict(str(dict(kwargs)), api_name="/submit_nochat_api")
+print(ast.literal_eval(res)["response"])
+```
+
+### Using base64-encoded bytes
+
+```python
+import ast
+from gradio_client import Client
+from src.utils import download_image
+from src.vision.utils_vision import img_to_base64
+
+client = Client("http://localhost:7860", auth=("user", "pass"))
+
+image_url = "https://raw.githubusercontent.com/open-mmlab/mmdeploy/main/tests/data/tiger.jpeg"
+image_file = download_image(image_url, "datatest")
+image_bytes = img_to_base64(image_file)
+
+kwargs = dict(
+    visible_models="THUDM/cogvlm2-llama3-chat-19B",
+    instruction_nochat="Describe the image",
+    h2ogpt_key="EMPTY",
+    stream_output=False,
+    image_file=image_bytes,
+    temperature=0,
+    max_tokens=4000,
+)
+res = client.predict(str(dict(kwargs)), api_name="/submit_nochat_api")
+print(ast.literal_eval(res)["response"])
+```
+
+---
+
+## Listing models
+
+```python
+from gradio_client import Client
+import ast
+
+client = Client("http://localhost:7860")
+
+res = client.predict(api_name="/model_names")
+models = {x["base_model"]: x["max_seq_len"] for x in ast.literal_eval(res)}
+print(models)
+# Example output:
+# {
+#   'h2oai/h2ogpt-4096-llama2-70b-chat': 4046,
+#   'lmsys/vicuna-13b-v1.5-16k': 16334,
+#   'gpt-3.5-turbo-0613': 4046,
+# }
+```
+
+---
+
+## Curl for the Gradio API
+
+API endpoints that have no `gr.State()` parameters can also be called with curl:
+
+```bash
+curl 127.0.0.1:7860/api/submit_nochat_plain_api \
+  -X POST \
+  -d '{"data": ["{\"instruction_nochat\": \"Who are you?\"}"]}' \
+  -H "Content-Type: application/json"
+```
+
+The response is a JSON object with a `data` array. The first element is a string representation of a dict with keys `response`, `sources`, and `save_dict`.
+
+<Note>
+  Full curl support for all Gradio endpoints is not yet implemented upstream. Use the Gradio Python client or the OpenAI-compatible API for more complex calls.
+</Note>
+
+---
+
+## Efficient summarization at scale
+
+For high-throughput summarization and extraction, configure the server for parallel async output:
+
+```bash
+python generate.py \
+  --async_output=True \
+  --num_async=10 \
+  --inference_server=<vllm_or_tgi_url>
+```
+
+Then call `client.summarize()` or `client.extract()` as normal. The server processes document chunks in parallel rather than sequentially.

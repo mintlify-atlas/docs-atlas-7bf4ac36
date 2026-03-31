@@ -1,0 +1,237 @@
+---
+title: "Voice STT and TTS"
+description: "Speech-to-text with Whisper and text-to-speech with Microsoft SpeechT5 or Coqui TTS, including voice cloning and hands-free AI assistant mode."
+---
+
+h2oGPT includes a full voice pipeline: Whisper converts spoken audio to text (STT), and either Microsoft SpeechT5 or Coqui TTS converts model responses back to speech (TTS). An optional AI Assistant Voice Control mode enables fully hands-free operation.
+
+<Note>
+  STT and TTS models are preloaded at startup when enabled. If you do not need voice features, pass `--enable_tts=False --enable_stt=False` to avoid consuming GPU memory.
+</Note>
+
+## Speech-to-text (STT) with Whisper
+
+h2oGPT uses [OpenAI Whisper](https://github.com/openai/whisper) and its distilled variants for audio transcription. STT is used for:
+
+- Real-time voice input in the chat UI.
+- Automatic transcription of uploaded audio and video files before indexing.
+- ASR (Automatic Speech Recognition) for YouTube and other media ingested during document Q&A.
+
+### Enabling STT
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --enable_stt=True \
+  --asr_model=openai/whisper-large-v3
+```
+
+### Whisper model options
+
+| Model | Notes |
+|-------|-------|
+| `openai/whisper-large-v3` | Highest accuracy. Recommended for production. |
+| `distil-whisper/distil-large-v3` | ~10× faster than large-v3 with similar accuracy. Good default. |
+| `openai/whisper-base` | Smallest, fastest. Suitable for low-resource environments. |
+
+<Tip>
+  For the best balance of speed and accuracy, use `distil-whisper/distil-large-v3`. It is approximately 10× faster than large-v3 and about 2× more memory-efficient than using `faster_whisper` with large-v2.
+</Tip>
+
+### Faster inference with `faster_whisper`
+
+If the `faster_whisper` package is installed, h2oGPT automatically uses it for large-v2 and large-v3 models. This gives roughly 4× speedup and 2× lower memory usage compared to the standard implementation.
+
+### OpenAI-compatible STT API
+
+h2oGPT exposes a `/v1/audio/transcriptions` endpoint compatible with the OpenAI Audio API:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:5000/v1")
+
+with open("audio.wav", "rb") as f:
+    transcript = client.audio.transcriptions.create(
+        model="openai/whisper-large-v3",
+        file=f
+    )
+print(transcript.text)
+```
+
+## Text-to-speech (TTS)
+
+h2oGPT supports two TTS backends. Choose based on your licensing requirements and quality needs.
+
+<Tabs>
+  <Tab title="Microsoft SpeechT5 (MIT)">
+    Microsoft SpeechT5 is the default TTS engine. It is MIT licensed, runs entirely on-device, and supports multiple voices.
+
+    ```bash
+    python generate.py \
+      --base_model=llama \
+      --enable_tts=True \
+      --tts_model=microsoft/speecht5_tts \
+      --speaker="SLT (female)"
+    ```
+
+    Available speaker styles include `SLT (female)` and others from the CMU ARCTIC speaker set. Use the **Speech Style** dropdown in the left sidebar to switch voices at runtime.
+
+    **Streaming** — SpeechT5 supports streaming audio so responses begin playing before generation is complete.
+  </Tab>
+  <Tab title="Coqui XTTS (MPL2)">
+    Coqui's `xtts_v2` model supports more languages, produces higher-quality output, and allows voice cloning. It is licensed under MPL2.
+
+    ```bash
+    python generate.py \
+      --base_model=llama \
+      --enable_tts=True \
+      --tts_model=tts_models/multilingual/multi-dataset/xtts_v2 \
+      --chatbot_role="Female AI Assistant"
+    ```
+
+    If DeepSpeed is installed, set `CUDA_HOME` to match your torch CUDA version so that CUDA kernels compile correctly.
+
+    <Note>
+      `chatbot_role` applies to Coqui models; `speaker` applies to Microsoft models. Set the appropriate one for your chosen backend.
+    </Note>
+  </Tab>
+</Tabs>
+
+### Enabling TTS with a default voice
+
+By default, no voice is selected and TTS is silent until you choose a style in the UI. To start speaking immediately:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --enable_tts=True \
+  --enable_stt=True \
+  --chatbot_role="Female AI Assistant" \
+  --speaker="SLT (female)" \
+  --system_prompt="You are a helpful assistant named Jennifer who can hear and speak."
+```
+
+The system prompt is useful to inform the LLM that it can listen and speak, but keep it general — overly specific prompts cause models to add gesture descriptions that sound unnatural when read aloud.
+
+### Full multi-GPU voice setup
+
+For a 4-GPU system with high-quality STT and TTS alongside document Q&A:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --pre_load_image_audio_models=True \
+  --score_model=None \
+  --embedding_gpu_id=0 \
+  --caption_gpu_id=1 \
+  --captions_model=microsoft/Florence-2-large \
+  --enable_pdf_doctr=on \
+  --doctr_gpu_id=2 \
+  --asr_gpu_id=3 \
+  --asr_model=openai/whisper-large-v3 \
+  --sst_model=openai/whisper-large-v3 \
+  --tts_model=tts_models/multilingual/multi-dataset/xtts_v2 \
+  --tts_gpu_id=2 \
+  --chatbot_role="Female AI Assistant" \
+  --speaker="SLT (female)" \
+  --system_prompt="You are a helpful assistant named Jennifer who can hear and speak."
+```
+
+### OpenAI-compatible TTS API
+
+h2oGPT exposes a `/v1/audio/speech` endpoint and a Gradio API (`/speak_text_api`).
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:5000/v1")
+
+response = client.audio.speech.create(
+    model="microsoft/speecht5_tts",
+    voice="SLT (female)",
+    input="Hello! I am h2oGPT."
+)
+response.stream_to_file("output.mp3")
+```
+
+You can also call the endpoint with `curl`:
+
+```bash
+curl 127.0.0.1:7860/api/speak_text_plain_api \
+  -X POST \
+  -d '{"data": ["{\"chatbot_role\": \"Female AI Assistant\", \"speaker\": \"SLT (female)\", \"tts_language\": \"autodetect\", \"tts_speed\": 1.0, \"prompt\": \"Say cheese.\", \"stream_output\": \"False\", \"h2ogpt_key\": \"\"}"]}' \
+  -H 'Content-Type: application/json'
+```
+
+## Voice cloning (Coqui XTTS only)
+
+Voice cloning lets you add a custom speaker based on a recorded sample and use it across sessions.
+
+<Steps>
+  <Step title="Enable Coqui XTTS">
+    Launch h2oGPT with the XTTS model:
+    ```bash
+    python generate.py \
+      --base_model=llama \
+      --tts_model=tts_models/multilingual/multi-dataset/xtts_v2
+    ```
+  </Step>
+  <Step title="Open the Expert tab">
+    Go to the **Expert** tab in the UI and scroll to the **Speech Control and Voice Cloning** section.
+  </Step>
+  <Step title="Provide a voice sample">
+    Either upload a clean audio file (WAV, MP4A, etc.) using **File for Clone**, or record up to 30 seconds of audio using **Mic for Clone**. Check **Use Mic for Cloning** if you recorded from the microphone.
+
+    Files are automatically trimmed to 30 seconds. Use a clean sample with only the target voice for the best results.
+  </Step>
+  <Step title="Name the speaker">
+    Enter a name in the **Speaker Style** field. This name will appear in the **Speech Style** dropdown in the left sidebar.
+  </Step>
+  <Step title="Clone the voice">
+    Click **Clone Voice for new Speech Style**. Within seconds the new speaker is available in the sidebar. If you are logged in, the speaker is saved to your user state for future sessions.
+  </Step>
+</Steps>
+
+## AI Assistant Voice Control mode
+
+Voice Control mode enables fully hands-free interaction with h2oGPT. Say an action word to start recording, ask your question, and the model responds in speech — no keyboard required.
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --enable_tts=True \
+  --enable_stt=True \
+  --tts_model=tts_models/multilingual/multi-dataset/xtts_v2 \
+  --tts_action_phrases="['Nimbus']" \
+  --tts_stop_phrases="['Yonder']"
+```
+
+- **Action phrase** (`--tts_action_phrases`) — Saying this word activates the microphone and begins recording your query. Use a distinctive phrase like `Nimbus Clouds` to reduce false activations.
+- **Stop phrase** (`--tts_stop_phrases`) — Saying this word cancels active recording or TTS playback.
+
+<Warning>
+  AI Voice Control mode is experimental and disabled by default (both lists default to empty). It works well when used exclusively for voice, but causes the text input box to flicker when interleaved with keyboard input.
+</Warning>
+
+## Stopping speech playback
+
+- Click **Stop** in the top-right corner to halt both text generation and speech output.
+- Click **Stop/Clear Speak** to stop speech while leaving the generated text visible. This applies when you triggered speech manually with **Speak Instruction** or **Speak Response**.
+
+## CLI flags reference
+
+| Flag | Description |
+|------|-------------|
+| `--enable_stt` | Enable speech-to-text. Default: `True`. Set `False` to save GPU memory. |
+| `--enable_tts` | Enable text-to-speech. Default: `True`. Set `False` to save GPU memory. |
+| `--tts_model` | TTS model to load. Default: `microsoft/speecht5_tts`. |
+| `--asr_model` | Whisper model for STT/ASR. Default: `openai/whisper-large-v3`. |
+| `--sst_model` | Whisper model for real-time speech input. Defaults to `--asr_model`. |
+| `--speaker` | Default speaker for Microsoft SpeechT5 (e.g. `SLT (female)`). |
+| `--chatbot_role` | Default chatbot role for Coqui TTS (e.g. `Female AI Assistant`). |
+| `--asr_gpu_id` | GPU index for the ASR model. |
+| `--tts_gpu_id` | GPU index for the TTS model. |
+| `--pre_load_image_audio_models` | Preload all audio/image models at startup for faster first use. |
+| `--tts_action_phrases` | List of action words to activate Voice Control mode. |
+| `--tts_stop_phrases` | List of stop words to deactivate Voice Control mode. |

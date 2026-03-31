@@ -1,0 +1,169 @@
+---
+title: 'Fine-tuning'
+description: 'Fine-tune h2oGPT models on custom datasets using LoRA, 4-bit/8-bit quantization, and the finetune.py script.'
+---
+
+Fine-tuning adapts a pre-trained LLM to a specific prompting style or domain without retraining from scratch. This page covers dataset formats, running `finetune.py`, and launching a chatbot from your fine-tuned weights.
+
+## Pre-training vs fine-tuning
+
+<Tabs>
+  <Tab title="Pre-training">
+    Pre-training teaches an LLM a language by exposing it to terabytes of raw text. The model learns token co-occurrence across hundreds of billions of examples.
+
+    - Data scale: terabytes
+    - Duration: weeks to months on dozens–hundreds of GPUs
+    - Primary concern: underfitting and compute cost
+    - Example input:
+
+    ```text
+    and suddenly all the players raised their hands and shouted
+    ```
+  </Tab>
+  <Tab title="Fine-tuning">
+    Fine-tuning presents a small, high-quality dataset to make the model familiar with a specific prompting style. It relies on labeled input/output pairs.
+
+    - Data scale: megabytes to gigabytes
+    - Duration: hours to days on a few GPUs
+    - Primary concern: overfitting
+    - Example input:
+
+    ```text
+    Instruction: Summarize.
+    Input: This is a very very very long paragraph saying nothing much.
+    Output: Nothing was said.
+    ```
+  </Tab>
+</Tabs>
+
+## Dataset formats
+
+### Instruction format
+
+Use instruction-style data to teach the model to follow directives. During inference, leave `Output:` empty for the model to complete:
+
+```text
+Instruction: Summarize.
+Input: TEXT TO SUMMARIZE
+Output:
+```
+
+### Chat format
+
+Use chat-style data for conversational fine-tuning. During inference, present the conversation up to `<bot>:` for the model to respond:
+
+```text
+<human>: Hi, who are you?
+<bot>: I'm h2oGPT.
+<human>: Who trained you?
+<bot>: I was trained by H2O.ai, the visionary leader in democratizing AI.
+```
+
+Inference prompt:
+
+```text
+<human>: USER INPUT FROM CHAT APPLICATION
+<bot>:
+```
+
+## Preparing a dataset
+
+h2oGPT provides scripts to assemble and clean a high-quality OIG-based instruct dataset:
+
+```bash
+pytest -s create_data.py::test_download_useful_data_as_parquet  # downloads ~4.2 GB of permissive open-source data
+pytest -s create_data.py::test_assemble_and_detox               # ~3 minutes, 4.1M clean conversations
+pytest -s create_data.py::test_chop_by_lengths                  # ~2 minutes, 2.8M clean and long-enough conversations
+pytest -s create_data.py::test_grade                            # ~3 hours, keeps only high quality data
+pytest -s create_data.py::test_finalize_to_json
+```
+
+This produces `h2ogpt-oig-oasst1-instruct-cleaned-v2.json` (575 MB, ~350k human↔bot interactions). The dataset is available on Hugging Face at `h2oai/h2ogpt-oig-oasst1-instruct-cleaned-v2`.
+
+<Warning>
+  The assembled dataset is cleaned but may still contain undesired words or concepts. Review it before use in production.
+</Warning>
+
+## Install training dependencies
+
+```bash
+pip install -r reqs_optional/requirements_optional_training.txt
+```
+
+## Run fine-tuning with finetune.py
+
+Fine-tuning with default settings requires **48 GB of GPU memory per GPU** (fast 16-bit training). Use the flags below to reduce memory usage on smaller GPUs.
+
+### Single-node multi-GPU (recommended)
+
+```bash
+export NGPUS=$(nvidia-smi -L | wc -l)
+torchrun --nproc_per_node=$NGPUS finetune.py \
+  --base_model=h2oai/h2ogpt-oasst1-512-20b \
+  --data_path=h2oai/h2ogpt-oig-oasst1-instruct-cleaned-v2 \
+  --output_dir=h2ogpt_lora_weights
+```
+
+This downloads the base model, loads the training data, and writes LoRA adapter weights to `h2ogpt_lora_weights/`.
+
+### Reducing memory with quantization
+
+For GPUs with less than 48 GB, combine quantization with smaller batch and context settings:
+
+<Tabs>
+  <Tab title="4-bit (lowest memory)">
+    ```bash
+    torchrun --nproc_per_node=$NGPUS finetune.py \
+      --base_model=h2oai/h2ogpt-oasst1-512-12b \
+      --data_path=h2oai/h2ogpt-oig-oasst1-instruct-cleaned-v2 \
+      --output_dir=h2ogpt_lora_weights \
+      --train_4bit=True \
+      --micro_batch_size=1 \
+      --batch_size=$NGPUS \
+      --cutoff_len=256
+    ```
+  </Tab>
+  <Tab title="8-bit">
+    ```bash
+    torchrun --nproc_per_node=$NGPUS finetune.py \
+      --base_model=h2oai/h2ogpt-oasst1-512-12b \
+      --data_path=h2oai/h2ogpt-oig-oasst1-instruct-cleaned-v2 \
+      --output_dir=h2ogpt_lora_weights \
+      --train_8bit=True \
+      --micro_batch_size=1 \
+      --batch_size=$NGPUS \
+      --cutoff_len=256
+    ```
+  </Tab>
+</Tabs>
+
+### Key finetune.py flags
+
+| Flag | Description |
+|---|---|
+| `--base_model` | HuggingFace model name or local path to the base model |
+| `--data_path` | HuggingFace dataset name or local JSON file path |
+| `--output_dir` | Directory to write LoRA adapter weights |
+| `--train_4bit` | Use 4-bit quantization during training |
+| `--train_8bit` | Use 8-bit quantization during training |
+| `--micro_batch_size` | Per-GPU batch size (reduce to save memory) |
+| `--batch_size` | Total batch size across all GPUs |
+| `--cutoff_len` | Maximum sequence length (reduce to save memory) |
+
+## Launch your fine-tuned chatbot
+
+After fine-tuning, start a chatbot using the base model and your LoRA weights. This also requires 48 GB GPU. Use `--load_4bit=True` for 24 GB GPUs:
+
+```bash
+torchrun generate.py \
+  --load_8bit=True \
+  --base_model=h2oai/h2ogpt-oasst1-512-20b \
+  --lora_weights=h2ogpt_lora_weights \
+  --prompt_type=human_bot
+```
+
+This opens the Gradio UI with streaming text generation powered by your fine-tuned model.
+
+<Tip>
+  Always set `--prompt_type` to match the format you used during fine-tuning. Mismatched prompt types are a common cause of poor inference quality after fine-tuning.
+</Tip>

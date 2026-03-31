@@ -1,0 +1,223 @@
+---
+title: "Linux"
+description: "Install and run h2oGPT natively on Ubuntu x86_64 using Miniconda and pip, with CUDA 12.1 or CPU support."
+---
+
+These instructions are for Ubuntu x86_64. Substitute `apt-get` with the appropriate package manager for other distributions.
+
+## Quick install (script)
+
+<Steps>
+  <Step title="Install the CUDA toolkit (GPU only)">
+    Skip this step for CPU-only inference.
+
+    ```bash
+    wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run
+    sudo sh cuda_12.1.1_530.30.02_linux.run
+    ```
+
+    Install only the toolkit — do not overwrite the existing driver or `/usr/local/cuda` symlink when prompted.
+  </Step>
+
+  <Step title="Run the installation script">
+    ```bash
+    curl -fsSL https://h2o-release.s3.amazonaws.com/h2ogpt/linux_install_full.sh | bash
+    ```
+
+    Enter your sudo password when prompted. To avoid repeated password prompts, extend the sudo timeout first:
+
+    ```bash
+    sudo visudo
+    # Add after the "Defaults env_reset" line:
+    # Defaults        timestamp_timeout=60
+    sudo bash
+    exit
+    ```
+  </Step>
+
+  <Step title="Activate the h2oGPT environment">
+    ```bash
+    conda activate h2ogpt
+    ```
+  </Step>
+</Steps>
+
+## Manual install
+
+<Steps>
+  <Step title="Set up a Python 3.10 environment with Miniconda">
+    ```bash
+    wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.1.0-1-Linux-x86_64.sh
+    bash ./Miniconda3-py310_23.1.0-1-Linux-x86_64.sh -b -p $HOME/miniconda3
+
+    echo '### Conda init ###' >> $HOME/.bashrc
+    echo 'source $HOME/miniconda3/etc/profile.d/conda.sh' >> $HOME/.bashrc
+    echo 'conda activate' >> $HOME/.bashrc
+    source $HOME/.bashrc
+
+    conda update conda -y
+    conda create -n h2ogpt -y
+    conda activate h2ogpt
+    conda install python=3.10 -c conda-forge -y
+    ```
+
+    Verify the Python version:
+    ```bash
+    python --version
+    python -c "import os, sys ; print('hello world')"
+    ```
+
+    The output should show `3.10.xx` and print `hello world`.
+  </Step>
+
+  <Step title="Clone h2oGPT">
+    ```bash
+    git clone https://github.com/h2oai/h2ogpt.git
+    cd h2ogpt
+    ```
+  </Step>
+
+  <Step title="Install CUDA toolkit and set environment variables (GPU only)">
+    Skip this step for CPU inference.
+
+    ```bash
+    wget https://developer.download.nvidia.com/compute/cuda/12.1.1/local_installers/cuda_12.1.1_530.30.02_linux.run
+    sudo sh cuda_12.1.1_530.30.02_linux.run
+    ```
+
+    Add CUDA to your environment:
+    ```bash
+    echo 'export CUDA_HOME=/usr/local/cuda-12.1' >> $HOME/.bashrc
+    echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CUDA_HOME/lib64:$CUDA_HOME/extras/CUPTI/lib64' >> $HOME/.bashrc
+    echo 'export PATH=$PATH:$CUDA_HOME/bin' >> $HOME/.bashrc
+    source $HOME/.bashrc
+    ```
+  </Step>
+
+  <Step title="Set the PyTorch index URL">
+    <Tabs>
+      <Tab title="CUDA 12.1">
+        ```bash
+        export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu121 https://huggingface.github.io/autogptq-index/whl/cu121"
+        ```
+      </Tab>
+      <Tab title="CUDA 11.8">
+        ```bash
+        export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu118 https://huggingface.github.io/autogptq-index/whl/cu118"
+        ```
+
+        Choose `cu118` or higher for A100/H100 GPUs.
+      </Tab>
+      <Tab title="CPU only">
+        ```bash
+        export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu"
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Set llama_cpp_python build flags (GPU only)">
+    ```bash
+    export GGML_CUDA=1
+    export CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=all"
+    export FORCE_CMAKE=1
+    ```
+
+    <Note>
+      Building with all CUDA architectures takes time but is required — llama_cpp_python fails if `all` is omitted from `CMAKE_CUDA_ARCHITECTURES`.
+    </Note>
+  </Step>
+
+  <Step title="Run the installation script">
+    ```bash
+    bash docs/linux_install.sh
+    ```
+
+    To include GPL-licensed packages (PyMuPDF, etc.):
+    ```bash
+    GPLOK=1 bash docs/linux_install.sh
+    ```
+
+    You can comment out optional sections in the script to skip packages you do not need.
+  </Step>
+</Steps>
+
+## Run h2oGPT
+
+Verify that CUDA is visible to PyTorch (GPU only):
+
+```python
+import torch
+print(torch.cuda.is_available())  # should print True
+```
+
+Place documents for Q&A in a `user_path` directory, then start h2oGPT:
+
+<CodeGroup>
+  ```bash GPU (24 GB+) with 8-bit quantization
+  python generate.py \
+    --base_model=h2oai/h2ogpt-4096-llama2-13b-chat \
+    --load_8bit=True \
+    --score_model=None \
+    --langchain_mode='UserData' \
+    --user_path=user_path
+  ```
+
+  ```bash GPU (smaller — 7B without quantization)
+  python generate.py \
+    --base_model=h2oai/h2ogpt-4096-llama2-7b-chat \
+    --score_model=None \
+    --langchain_mode='UserData' \
+    --user_path=user_path
+  ```
+
+  ```bash CPU (llama.cpp GGUF)
+  python generate.py \
+    --base_model='llama' \
+    --prompt_type=llama2 \
+    --score_model=None \
+    --langchain_mode='UserData' \
+    --user_path=user_path \
+    --model_path_llama=https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf?download=true \
+    --max_seq_len=4096
+  ```
+</CodeGroup>
+
+Models are cached in `~/.cache/` (huggingface, chroma, torch, etc.). Open [http://localhost:7860](http://localhost:7860) after the server starts.
+
+<Tip>
+  Add `--share=True` to expose a public Gradio URL for remote access.
+</Tip>
+
+## Troubleshooting
+
+**`undefined symbol` error with flash_attn**
+
+Ensure `CUDA_HOME` matches the toolkit version used to build h2oGPT, then reinstall:
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.1
+pip uninstall flash_attn autoawq autoawq-kernels -y
+pip install flash_attn autoawq autoawq-kernels --no-cache-dir
+```
+
+**`protobuf` import error**
+
+```bash
+pip install protobuf==3.20.0
+```
+
+**Ubuntu 18 (very out of date)**
+
+<Warning>
+  Only run the commands below on Ubuntu 18. Do not run them on Ubuntu 20 or 22.
+
+  ```bash
+  apt-get clean all
+  apt-get update
+  apt-get -y full-upgrade
+  apt-get -y dist-upgrade
+  apt-get -y autoremove
+  apt-get clean all
+  ```
+</Warning>

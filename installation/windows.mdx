@@ -1,0 +1,168 @@
+---
+title: "Windows"
+description: "Install h2oGPT on Windows 10 or 11 using Miniconda, Visual Studio build tools, and a single .bat installer script."
+---
+
+These instructions cover a full installation of h2oGPT on Windows 10 or 11, including optional GPU (CUDA) support. The installer script takes approximately 9 GB of disk space if no optional packages are skipped.
+
+<Note>
+  Docker is recommended for full capabilities on Windows, including vision, audio, and image generation. See the [Docker install](/installation/docker) guide.
+</Note>
+
+## Prerequisites
+
+Install the following tools before running the h2oGPT installer.
+
+<Steps>
+  <Step title="Install Visual Studio 2022">
+    Download [Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/) and run the installer.
+
+    1. Click **Individual Components**.
+    2. Search for and select each of the following:
+       - `Windows 11 SDK` (e.g. 10.0.22000.0)
+       - `C++ Universal Windows Platform support` (for v143 build tools)
+       - `MSVC VS 2022 C++ x64/x86 build tools` (latest)
+       - `C++ CMake tools for Windows`
+    3. Click **Install**. You do not need to launch Visual Studio when installation completes.
+  </Step>
+
+  <Step title="Install MinGW">
+    Download the [MinGW installer](https://sourceforge.net/projects/mingw/) and run it.
+
+    1. Select the following packages:
+       - `mingw32-base`
+       - `mingw32-gcc-g++`
+    2. Go to **Installation → Apply Changes**.
+  </Step>
+
+  <Step title="Install Miniconda">
+    Download and install [Miniconda for Windows](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html).
+  </Step>
+
+  <Step title="Install the latest NVIDIA driver (GPU only)">
+    Download and install the latest NVIDIA driver for Windows. Confirm it works:
+
+    ```cmdline
+    nvidia-smi
+    ```
+  </Step>
+</Steps>
+
+## Install h2oGPT
+
+Open the **Miniconda shell** (not PowerShell) as Administrator.
+
+<Steps>
+  <Step title="Add MinGW to your path">
+    ```cmdline
+    set path=%path%;c:\MinGW\msys\1.0\bin\
+    ```
+
+    On some systems the correct path is `c:\MinGW\bin\` instead.
+  </Step>
+
+  <Step title="Create the conda environment">
+    ```cmdline
+    conda create -n h2ogpt -y
+    conda activate h2ogpt
+    conda install python=3.10 -c conda-forge -y
+    python --version
+    python -c "import os, sys ; print('hello world')"
+    ```
+
+    The output should show `3.10.xx` and print `hello world`.
+  </Step>
+
+  <Step title="Install CUDA via conda (GPU only)">
+    ```cmdline
+    conda install cudatoolkit=11.8 -c conda-forge -y
+    set CUDA_HOME=%CONDA_PREFIX%
+    ```
+  </Step>
+
+  <Step title="Install Git and clone h2oGPT">
+    ```cmdline
+    conda install -c conda-forge git
+    git clone https://github.com/h2oai/h2ogpt.git
+    cd h2ogpt
+    ```
+  </Step>
+
+  <Step title="Set the PyTorch index URL">
+    <Tabs>
+      <Tab title="CUDA (GPU)">
+        ```cmdline
+        set PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu118 https://huggingface.github.io/autogptq-index/whl/cu118/
+        ```
+      </Tab>
+      <Tab title="CPU only">
+        ```cmdline
+        set PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Set llama_cpp_python build flags (GPU only)">
+    ```cmdline
+    set CMAKE_ARGS=-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=all
+    set GGML_CUDA=1
+    set FORCE_CMAKE=1
+    ```
+
+    <Note>
+      Building with all CUDA architectures takes time but is required — llama_cpp_python fails if `all` is omitted from `CMAKE_CUDA_ARCHITECTURES`.
+    </Note>
+  </Step>
+
+  <Step title="Run the installer script">
+    ```cmdline
+    docs\windows_install.bat
+    ```
+
+    To include GPL-licensed packages (PyMuPDF, etc.):
+    ```cmdline
+    set GPLOK=1
+    docs\windows_install.bat
+    ```
+
+    The script also contains instructions for enabling Microsoft Word/Excel support and Tesseract OCR. Open `docs\windows_install.bat` to review or customize the installation.
+  </Step>
+</Steps>
+
+## Notes
+
+- Models are cached in `C:\Users\<user>\.cache\` (huggingface, chroma, torch, etc.).
+- For Windows paths in h2oGPT arguments, use absolute paths: `--user_path=C:\Users\YourUsername\h2ogpt`.
+- Use `set CUDA_VISIBLE_DEVICES=0` to pin inference to a specific GPU.
+- If the model is using the GPU, `python.exe` appears in **Compute** (C) mode in `nvidia-smi`.
+
+## Troubleshooting
+
+**SSL certificate failure when connecting to Hugging Face**
+
+Your organization may be blocking HuggingFace. Try using a proxy or see the [HuggingFace transformers issue tracker](https://github.com/huggingface/transformers/issues/17611#issuecomment-1619582900).
+
+**Import errors at startup**
+
+Set `PYTHONPATH` in your launch script:
+
+```cmdline
+SET PYTHONPATH=.:src:%PYTHONPATH%
+python generate.py ...
+```
+
+**Using bash on Windows**
+
+For easier command-line operations, install [Git for Windows](https://github.com/git-for-windows/git/releases/download/v2.41.0.windows.3/Git-2.41.0.3-64-bit.exe) which includes bash and coreutils.
+
+## Environment variables
+
+You can override any `generate.py` CLI argument by setting an environment variable prefixed with `h2ogpt_`:
+
+- `n_jobs` — number of cores for various tasks
+- `OMP_NUM_THREADS` — thread count for LLaMa
+- `CUDA_VISIBLE_DEVICES` — which GPUs to use (e.g. `set CUDA_VISIBLE_DEVICES=0`)
+- `h2ogpt_server_name` — set to your LAN IP address (e.g. `192.168.1.172`) to expose h2oGPT on your local network
+
+To shut down h2oGPT, go to the **System** tab in the UI, click **Admin**, then click **Shutdown h2oGPT**.

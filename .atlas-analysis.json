@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "h2oGPT",
+  "projectType": "ai-ml",
+  "projectName": "h2oGPT",
+  "projectDescription": "An open-source, 100% private local LLM platform for chatting with documents, images, and more, with an OpenAI-compatible API and support for dozens of model backends.",
   "theme": "palm",
-  "colors": {
-    "primary": "#fae204",
-    "light": "#84740c",
-    "dark": "#303026"
-  },
-  "favicon": "https://media.brand.dev/a2905db9-6282-4da9-b8b6-7fb6bef56fb8.jpg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/h2oai/h2ogpt"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/h2oai/h2ogpt"
-    }
-  },
+  "primaryColor": "#fae204",
+  "lightColor": "#84740c",
+  "darkColor": "#303026",
   "navigation": {
     "tabs": [
       {
@@ -93,5 +80,31 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "100% private local LLM chat with Gradio UI",
+    "Document Q&A with persistent vector databases (Chroma, FAISS, Weaviate)",
+    "OpenAI-compatible API server (drop-in replacement)",
+    "Support for oLLaMa, vLLM, HF TGI, llama.cpp, GPT4All, and more",
+    "Vision models for image understanding (LLaVA, Claude, Gemini)",
+    "Voice STT/TTS with Whisper and Microsoft SpeechT5",
+    "Image generation with Stable Diffusion and Flux",
+    "Web search integration with document Q&A",
+    "AI Agents for search, Python code, CSV, and document tasks",
+    "Fine-tuning support with LoRA and full training",
+    "Multi-model comparison (bake-off) UI",
+    "Linux, Docker, macOS, and Windows support"
+  ],
+  "publicApiSurface": [
+    "POST /v1/chat/completions — OpenAI-compatible chat completions (streaming and non-streaming)",
+    "POST /v1/completions — OpenAI-compatible text completions",
+    "POST /v1/embeddings — Text embedding generation",
+    "POST /v1/audio/transcriptions — Speech-to-text (Whisper)",
+    "POST /v1/audio/speech — Text-to-speech",
+    "POST /v1/images/generations — Image generation",
+    "python generate.py — Main entry point CLI with dozens of flags",
+    "h2ogpt_generate — PyPI console script entry point",
+    "h2ogpt_finetune — Fine-tuning console script entry point",
+    "Gradio API — All UI buttons accessible via Gradio client API"
+  ]
 }

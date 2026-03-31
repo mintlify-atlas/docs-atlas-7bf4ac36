@@ -1,0 +1,286 @@
+---
+title: "Audio"
+description: "h2oGPT supports speech-to-text (STT) via Whisper and text-to-speech (TTS) via Coqui or Microsoft TTS, both exposed through OpenAI-compatible endpoints."
+---
+
+## Prerequisites
+
+Start h2oGPT with audio support enabled and models pre-loaded:
+
+```bash
+python generate.py \
+  --enable_stt=True \
+  --enable_tts=True \
+  --pre_load_image_audio_models=True
+```
+
+---
+
+## Speech to text
+
+`POST /v1/audio/transcriptions`
+
+Transcribes an audio file to text using Whisper. The request is a `multipart/form-data` upload.
+
+### Request parameters
+
+<ParamField body="file" type="file" required>
+  Audio file to transcribe. Accepted formats include WAV, MP3, and other formats supported by the underlying Whisper installation.
+</ParamField>
+
+<ParamField body="model" type="string" required>
+  Pass `"whisper-1"` for compatibility. The server uses its loaded Whisper model regardless of this value.
+</ParamField>
+
+<ParamField body="response_format" type="string" default="text">
+  Output format. Use `"text"` to receive a plain string.
+</ParamField>
+
+<ParamField body="stream" type="boolean" default="true">
+  When `true`, partial transcription results are returned as server-sent events. The OpenAI Python client does not expose streaming for transcriptions natively; use `httpx` directly to receive a streamed response.
+</ParamField>
+
+<ParamField body="chunk" type="string" default="interval">
+  Controls how audio is segmented for streaming. Options: `"silence"` or `"interval"`. Has no effect when `stream=false`.
+</ParamField>
+
+### Response
+
+```json
+{
+  "text": "Good morning. The sun is shining today."
+}
+```
+
+### Examples
+
+<CodeGroup>
+
+```python Python (non-streaming)
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:5000/v1", api_key="EMPTY")
+
+with open("speech.wav", "rb") as f:
+    audio_bytes = f.read()
+
+transcription = client.audio.transcriptions.create(
+    model="whisper-1",
+    file=audio_bytes,
+)
+print(transcription.text)
+```
+
+```python Python (streaming via httpx)
+import json
+import httpx
+import asyncio
+
+async def stream_transcription(file_path: str, model: str = "whisper-1"):
+    url = "http://localhost:5000/v1/audio/transcriptions"
+    headers = {"X-API-KEY": "EMPTY"}
+
+    with open(file_path, "rb") as f:
+        files = {
+            "file": ("audio.wav", f, "audio/wav"),
+            "model": (None, model),
+            "stream": (None, "true"),
+            "response_format": (None, "text"),
+            "chunk": (None, "none"),
+        }
+        text = ""
+        async with httpx.AsyncClient() as http_client:
+            async with http_client.stream(
+                "POST", url, headers=headers, files=files, timeout=120
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        try:
+                            data = json.loads(line[5:].strip())
+                            text += data["text"]
+                            print(data["text"], end="", flush=True)
+                        except json.JSONDecodeError:
+                            pass
+        return text
+
+final_text = asyncio.run(stream_transcription("speech.wav"))
+print("\n", final_text)
+```
+
+```bash curl
+curl http://localhost:5000/v1/audio/transcriptions \
+  -H "Authorization: Bearer EMPTY" \
+  -F "file=@speech.wav" \
+  -F "model=whisper-1" \
+  -F "response_format=text"
+```
+
+</CodeGroup>
+
+---
+
+## Text to speech
+
+`POST /v1/audio/speech`
+
+Converts input text to audio using Coqui TTS or Microsoft TTS.
+
+### Request parameters
+
+<ParamField body="model" type="string" default="">
+  Pass `"tts-1"` for compatibility. The server uses its loaded TTS model.
+</ParamField>
+
+<ParamField body="input" type="string" required>
+  The text to synthesize.
+</ParamField>
+
+<ParamField body="voice" type="string" default="">
+  If set, overrides both `chatbot_role` and `speaker`. For native OpenAI voices, h2oGPT translates them into defaults. Leave empty to rely on `chatbot_role` and `speaker`.
+</ParamField>
+
+<ParamField body="response_format" type="string" default="wav">
+  Audio format of the response. Options: `"wav"`, `"mp3"`, `"opus"`, `"aac"`, `"flac"`, `"pcm"`.
+</ParamField>
+
+<ParamField body="stream" type="boolean" default="true">
+  When `true`, audio is returned as a stream, one chunk (sentence) at a time. When `false`, the entire file is generated before returning.
+</ParamField>
+
+<ParamField body="stream_strip" type="boolean" default="true">
+  When `true` and `stream=true`, WAV headers are stripped from all chunks after the first so the stream is a contiguous audio byte sequence. When `false`, each chunk is a valid standalone WAV file.
+</ParamField>
+
+<ParamField body="chatbot_role" type="string" default="Female AI Assistant">
+  TTS role for Coqui TTS.
+</ParamField>
+
+<ParamField body="speaker" type="string" default="SLT (female)">
+  Speaker for Microsoft TTS.
+</ParamField>
+
+### Response
+
+Binary audio data in the requested format. The `Content-Type` header is set to `audio/<response_format>`.
+
+For streaming WAV, the server artificially inflates the header's reported duration so players can stream through to end of audio.
+
+### Examples
+
+<CodeGroup>
+
+```python Python (streaming)
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:5000/v1", api_key="EMPTY")
+
+with client.audio.speech.with_streaming_response.create(
+    model="tts-1",
+    voice="",
+    extra_body=dict(
+        stream=True,
+        chatbot_role="Female AI Assistant",
+        speaker="SLT (female)",
+        stream_strip=True,
+    ),
+    response_format="wav",
+    input="Good morning! The sun is shining brilliantly today.",
+) as response:
+    response.stream_to_file("speech.wav")
+```
+
+```python Python (non-streaming)
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:5000/v1", api_key="EMPTY")
+
+response = client.audio.speech.create(
+    model="tts-1",
+    voice="",
+    extra_body=dict(
+        stream=False,
+        chatbot_role="Female AI Assistant",
+        speaker="SLT (female)",
+        format="wav",
+    ),
+    input="Today is a wonderful day to build something people love!",
+)
+response.stream_to_file("speech.wav")
+```
+
+```bash curl
+curl http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer EMPTY" \
+  -d '{
+    "model": "tts-1",
+    "input": "Good morning! The sun is shining today.",
+    "voice": "",
+    "response_format": "wav",
+    "stream": false,
+    "chatbot_role": "Female AI Assistant",
+    "speaker": "SLT (female)"
+  }' \
+  --output speech.wav
+```
+
+</CodeGroup>
+
+### Real-time playback with httpx and pygame
+
+For applications that need to play audio while it is still being generated:
+
+```python
+import openai
+import httpx
+import pygame
+import pygame.mixer
+import io
+from pydub import AudioSegment
+
+pygame.mixer.init(frequency=16000, size=-16, channels=1)
+sound_queue = []
+
+def play_audio(audio_bytes: bytes):
+    s = io.BytesIO(audio_bytes)
+    segment = AudioSegment.from_raw(s, sample_width=2, frame_rate=16000, channels=1)
+    sound = pygame.mixer.Sound(io.BytesIO(segment.raw_data))
+    sound_queue.append(sound)
+    sound.play()
+    pygame.time.wait(int(sound.get_length() * 1000))
+
+client = openai.OpenAI(api_key="EMPTY")
+headers = {
+    "Authorization": f"Bearer {client.api_key}",
+    "Content-Type": "application/json",
+}
+data = {
+    "model": "tts-1",
+    "voice": "SLT (female)",
+    "input": "Good morning! The sun is shining brilliantly today.",
+    "stream": "true",
+    "stream_strip": "false",
+}
+
+with httpx.Client(timeout=None) as http_client:
+    with http_client.stream(
+        "POST",
+        "http://localhost:5000/v1/audio/speech",
+        headers=headers,
+        json=data,
+    ) as response:
+        chunk_riff = b""
+        for chunk in response.iter_bytes():
+            if chunk.startswith(b"RIFF"):
+                if chunk_riff:
+                    play_audio(chunk_riff)
+                chunk_riff = chunk
+            else:
+                chunk_riff += chunk
+        if chunk_riff:
+            play_audio(chunk_riff)
+
+for sound in sound_queue:
+    sound.stop()
+pygame.quit()
+```

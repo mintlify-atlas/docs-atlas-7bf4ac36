@@ -1,0 +1,204 @@
+---
+title: "Chat UI"
+description: "A tour of the h2oGPT Gradio UI — chat controls, left sidebar, multi-model comparison, authentication, and CLI visibility flags."
+---
+
+h2oGPT ships a full-featured Gradio web UI alongside its OpenAI-compatible API server. Every button and control described here is also accessible through the Gradio client API.
+
+<Note>
+  The UI layout changes frequently. Use `--visible_*` CLI flags to hide or show individual elements without editing source code.
+</Note>
+
+## Chat control buttons
+
+These buttons sit above the chat input box and control the active conversation.
+
+| Button | Purpose |
+|--------|---------|
+| **Submit** | Send the current message. Equivalent to pressing Enter in chat mode. |
+| **Stop** | Halt generation. The LLM may continue processing in the background until the current generation completes. |
+| **Save** | Persist the chat to the **Chats** accordion in the left sidebar. |
+| **Redo** | Re-run the last query with the same or updated settings. Enable sampling if you want a different response. |
+| **Undo** | Remove the last query–response pair from the conversation. |
+| **Clear** | Erase the entire chat history from the view. |
+
+## Left sidebar accordions
+
+The left sidebar contains several collapsible accordions that control context and document ingestion.
+
+| Item | Purpose |
+|------|---------|
+| **Chats** | Saved chats appear here after you click **Save**. Select a saved chat to restore it. |
+| **Max Ingest Quality** | Use all available methods to ingest files, URLs, and text. Enabling this is slower but more thorough. |
+| **Add Doc to Chat** | Append the ingested document to the active chat history. |
+| **Include Chat History** | Pass prior conversation turns to the LLM as context for the current query. |
+| **Include Web Search** | Augment the LLM context with live web search results. |
+| **Resources** | Choose document collections, database subsets, and agents. |
+| **Doc Counts** | Shows the current document and chunk count for the selected collection. |
+| **Newest Doc** | Displays the name of the last document added to the active collection. |
+
+### TTS controls inside the Chats accordion
+
+When TTS is enabled, additional controls appear inside the **Chats** accordion:
+
+| Control | Purpose |
+|---------|---------|
+| **Speak Instruction** | Read the text currently in the input box aloud. |
+| **Speak Response** | Read the last model response aloud (first model when using multi-chat). |
+| **Speech Style** | Select the voice style for TTS output. |
+| **Speech Speed** | Adjust the playback speed of generated speech. |
+
+### Resources accordion
+
+| Control | Purpose |
+|---------|---------|
+| **Collections** | Choose a collection to query or to upload documents into. |
+| **Database Subset** | Switch between `Relevant` (similarity search), `RelSources` (sources only), and `TopKSources` (top-k sources without LLM). |
+| **Agents** | Select an experimental agent. The most developed are the Search and CSV agents. |
+
+### Data collection types
+
+Collections default to the value set by `--langchain_mode` and the visible set is controlled by `--langchain_modes`.
+
+- **LLM** — Single query–response, no document context.
+- **UserData** — Shared and persistent. Writable when `--allow_upload_to_user_data=True`. Rebuilt from `--user_path` if set.
+- **MyData** — Private and non-persistent. Writable when `--allow_upload_to_my_data=True`.
+
+## Document Selection tab
+
+The **Document Selection** tab lets you filter documents before querying and manage the collection on disk.
+
+| Control | Purpose |
+|---------|---------|
+| **Select Subset of Document(s)** | Choose specific documents to include in a query or summarization. |
+| **Source Substrings** | Filter sources by filename or URL substring. |
+| **Content Substrings** | Filter sources by content substring. |
+| **Delete Selected Sources from DB** | Remove the selected documents from the vector database. |
+| **Update DB with new/changed files** | Scan `user_path` for new or changed files and update the database. |
+| **Add Collection** | Create a new named collection. Specify name, scope (shared/personal), and optional path. |
+| **Remove Collection from UI** | Remove a collection from the sidebar (does not delete data on disk). |
+| **Purge Collection** | Delete the collection, all source files, and the database directory. |
+| **Synchronize DB and UI** | Refresh the UI with any background changes made to the database. |
+| **Download File w/Sources** | Download the current list of sources after clicking **Update UI**. |
+| **Document Exceptions** | Lists documents that failed during ingestion. |
+| **Document Types Supported** | Shows the file types accepted by the current installation. |
+
+## Document Viewer tab
+
+Click **Update UI with Document(s) from DB** to populate the drop-down, then select a single document to view its extracted text.
+
+## Chat History tab
+
+Export, import, and manage saved conversations.
+
+| Button | Purpose |
+|--------|---------|
+| **Remove Selected Saved Chats** | Delete the currently-selected item from the left-sidebar chat list. |
+| **Flag Current Chat** | Log the chat history to disk to signal something unexpected in the response. |
+| **Export Chats to Download** | Package chats into a downloadable file. |
+| **Download Exported Chats** | Download the file produced by **Export Chats**. |
+| **Upload Chat File(s)** | Drag-drop or click to restore previously exported chats. |
+| **Chat Exceptions** | Lists any exceptions raised during chatting (Gradio does not surface these inline). |
+
+## Multi-model comparison (bake-off mode)
+
+h2oGPT supports running two models side-by-side in the same window.
+
+<Steps>
+  <Step title="Open the Models tab">
+    Click the **Models** tab in the main UI.
+  </Step>
+  <Step title="Enable Compare Mode">
+    Check the **Compare Mode** checkbox. A second model panel appears to the right.
+  </Step>
+  <Step title="Load a second model">
+    Select a different model or inference server in the second panel and click **Load (Download) Model**.
+  </Step>
+  <Step title="Submit queries">
+    Queries stream to each model independently. Both responses appear side-by-side for direct comparison.
+  </Step>
+</Steps>
+
+<Note>
+  Compare Mode uses GPU memory for both models simultaneously. Streaming runs sequentially for each model rather than in parallel.
+</Note>
+
+For simultaneous generation across many models, use `--model_lock` with a list of model configurations — this is the approach used on gpt.h2o.ai.
+
+## Authentication
+
+<Tabs>
+  <Tab title="Username and password">
+    Pass an auth file at startup:
+    ```bash
+    python generate.py --base_model=h2oai/h2ogpt-4096-llama2-13b-chat \
+      --auth_filename=auth.json \
+      --auth_access=open
+    ```
+    The first user to log in becomes the admin. Additional users take the role set by the admin (default: `pending`).
+  </Tab>
+  <Tab title="Google OAuth">
+    Set the required environment variables before launching:
+    ```bash
+    export ENABLE_OAUTH_SIGNUP=true
+    export GOOGLE_CLIENT_ID=<your_client_id>
+    export GOOGLE_CLIENT_SECRET=<your_client_secret>
+
+    python generate.py --base_model=meta-llama/Meta-Llama-3-8B-Instruct
+    ```
+    If Google redirects to HTTP instead of HTTPS, set `HTTPS_REDIRECT=1`.
+  </Tab>
+</Tabs>
+
+Remove the login tab entirely with `--visible_login_tab=False`.
+
+## State preservation
+
+When authentication is active, h2oGPT persists each user's:
+
+- Chat history
+- Selected collection
+- Speaker/voice style (if TTS is enabled)
+- Custom voice clones (Coqui TTS)
+
+State is stored per username. Users who are not logged in share a single guest session.
+
+## Controlling UI visibility with CLI flags
+
+Pass `--visible_*` flags to `generate.py` to show or hide any part of the interface. For a minimal chat-only view:
+
+```bash
+python generate.py \
+  --base_model=h2oai/h2ogpt-4096-llama2-13b-chat \
+  --visible_submit_buttons=False \
+  --visible_side_bar=False \
+  --visible_chat_tab=False \
+  --visible_doc_selection_tab=False \
+  --visible_doc_view_tab=False \
+  --visible_chat_history_tab=False \
+  --visible_expert_tab=False \
+  --visible_models_tab=False \
+  --visible_system_tab=False \
+  --visible_tos_tab=False \
+  --visible_hosts_tab=False \
+  --chat_tabless=True \
+  --visible_login_tab=False \
+  --visible_langchain_action_radio=False \
+  --allow_upload_to_user_data=False \
+  --allow_upload_to_my_data=False \
+  --langchain_mode=UserData
+```
+
+To also remove the h2oGPT header and branding:
+
+```bash
+  --visible_h2ogpt_logo=False \
+  --visible_h2ogpt_links=False \
+  --visible_h2ogpt_qrcode=False
+```
+
+To run in API-only mode with no UI at all, set `--chat_tabless=True` and `--visible_*` tabs all to `False`. The OpenAI-compatible server at port 5000 remains active.
+
+<Tip>
+  On Windows, use `pythonw.exe` with `h2oGPT.launch.pyw` and the same `--visible_*` flags to launch a minimal window that hides in the system tray.
+</Tip>

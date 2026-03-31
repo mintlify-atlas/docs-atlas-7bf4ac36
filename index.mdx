@@ -1,97 +1,69 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "h2oGPT — Private Local LLM Platform"
+description: "Query and summarize your documents, chat with local private LLMs, and run a fully OpenAI-compatible API server. 100% private, Apache 2.0 open source."
 ---
 
-## Setting up
+h2oGPT lets you run powerful large language models entirely on your own hardware — no data leaves your network. Chat with documents, images, and audio; connect dozens of model backends; and expose a drop-in OpenAI-compatible API server.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get h2oGPT running in minutes with pip or Docker
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Docker Install" icon="docker" href="/installation/docker">
+    Recommended for full capabilities on Linux, Windows, and macOS
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Document Q&A" icon="file-magnifying-glass" href="/features/document-qa">
+    Chat with PDFs, Word docs, spreadsheets, images, and more
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/overview">
+    OpenAI-compatible REST API for chat, embeddings, audio, and images
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Key capabilities
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Chat UI" icon="comments" href="/features/chat-ui">
+    Gradio-based UI with streaming, multi-model bake-off, and saved chats
+  </Card>
+  <Card title="Vision & Images" icon="image" href="/features/vision-and-images">
+    Understand images with LLaVA and generate images with Stable Diffusion
+  </Card>
+  <Card title="Voice STT / TTS" icon="microphone" href="/features/voice-stt-tts">
+    Whisper speech-to-text and Microsoft SpeechT5 text-to-speech
+  </Card>
+  <Card title="Agents" icon="robot" href="/advanced/agents">
+    Autonomous agents for web search, Python code, CSV analysis, and more
+  </Card>
+  <Card title="Model Backends" icon="server" href="/models/supported-models">
+    oLLaMa, vLLM, llama.cpp, GPT4All, HF TGI, and many more
+  </Card>
+  <Card title="Fine-tuning" icon="sliders" href="/advanced/finetuning">
+    Fine-tune models with LoRA on your own data
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Get started in three steps
 
-## Need inspiration?
+<Steps>
+  <Step title="Install h2oGPT">
+    The fastest path is pip install. For full capabilities including vision, audio, and image generation, use Docker.
+    ```bash
+    pip install h2ogpt
+    ```
+  </Step>
+  <Step title="Launch the server">
+    Run `generate.py` pointing at any supported model. h2oGPT starts a Gradio UI and an OpenAI-compatible API server automatically.
+    ```bash
+    python generate.py --base_model=TheBloke/Mistral-7B-Instruct-v0.2-GGUF \
+      --prompt_type=mistral --max_seq_len=4096
+    ```
+  </Step>
+  <Step title="Open the UI or call the API">
+    Visit `http://localhost:7860` for the chat UI, or connect any OpenAI SDK client to `http://localhost:5000/v1`.
+  </Step>
+</Steps>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  h2oGPT is 100% private — all inference runs locally. No data is sent to external servers unless you explicitly configure a remote inference backend.
+</Note>

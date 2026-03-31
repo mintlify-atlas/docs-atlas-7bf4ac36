@@ -1,0 +1,190 @@
+---
+title: "macOS"
+description: "Install h2oGPT on macOS with CPU or Metal MPS acceleration for Apple Silicon (M1/M2) using Miniconda and pip."
+---
+
+h2oGPT supports CPU inference and Metal MPS acceleration on Apple Silicon (M1/M2). Intel Macs run in CPU mode.
+
+<Note>
+  Docker is recommended for full capabilities on macOS. Metal GPU acceleration is not available inside Docker on macOS, but Docker supports CPU-based HuggingFace models. See the [Docker install](/installation/docker) guide.
+</Note>
+
+## Install
+
+<Steps>
+  <Step title="Install Miniconda for Python 3.10">
+    Download and install [Miniconda for macOS](https://docs.conda.io/en/latest/miniconda.html#macos-installers).
+  </Step>
+
+  <Step title="Create the conda environment">
+    Open Terminal and run:
+
+    ```bash
+    conda create -n h2ogpt python=3.10 rust
+    conda activate h2ogpt
+    ```
+
+    Rust is required for some dependency builds.
+  </Step>
+
+  <Step title="Clone h2oGPT and install base dependencies">
+    ```bash
+    git clone https://github.com/h2oai/h2ogpt.git
+    cd h2ogpt
+
+    # Fix any stale pandoc packages
+    pip uninstall -y pandoc pypandoc pypandoc-binary
+    pip install --upgrade pip
+    python -m pip install --upgrade setuptools
+
+    # Install PyTorch (CPU build)
+    pip install -r requirements.txt \
+      --extra-index https://download.pytorch.org/whl/cpu \
+      -c reqs_optional/reqs_constraints.txt
+    ```
+  </Step>
+
+  <Step title="Install document Q&A dependencies">
+    ```bash
+    # LangChain (required for document Q&A)
+    pip install -r reqs_optional/requirements_optional_langchain.txt \
+      -c reqs_optional/reqs_constraints.txt
+
+    # llama.cpp with Metal support
+    pip uninstall -y llama-cpp-python llama-cpp-python-cuda
+    export CMAKE_ARGS=-DLLAMA_METAL=on
+    export FORCE_CMAKE=1
+    pip install -r reqs_optional/requirements_optional_llamacpp_gpt4all.txt \
+      -c reqs_optional/reqs_constraints.txt --no-cache-dir
+
+    pip install librosa -c reqs_optional/reqs_constraints.txt
+    ```
+  </Step>
+
+  <Step title="Install optional packages">
+    ```bash
+    # Optional: PyMuPDF and ArXiv (GPL-licensed)
+    pip install -r reqs_optional/requirements_optional_langchain.gpllike.txt \
+      -c reqs_optional/reqs_constraints.txt
+
+    # Optional: Selenium and Playwright for web scraping
+    pip install -r reqs_optional/requirements_optional_langchain.urls.txt \
+      -c reqs_optional/reqs_constraints.txt
+
+    # Optional: DocTR OCR
+    conda install weasyprint pygobject -c conda-forge -y
+    pip install -r reqs_optional/requirements_optional_doctr.txt \
+      -c reqs_optional/reqs_constraints.txt
+
+    # Optional: NLTK data for unstructured
+    python -m nltk.downloader all
+    ```
+  </Step>
+
+  <Step title="Install OCR and document support (optional)">
+    For Tesseract OCR and Word/Excel document support:
+
+    ```bash
+    brew install libmagic
+    brew link libmagic
+    brew install poppler
+    brew install tesseract
+    brew install tesseract-lang
+    brew install rubberband
+    brew install pygobject3 gtk4
+    brew install libjpeg
+    brew install libpng
+    brew install wget
+    ```
+
+    For Word and Excel file support, download and install [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/).
+  </Step>
+</Steps>
+
+## Run
+
+Start h2oGPT with a GGUF model:
+
+```bash
+python generate.py \
+  --base_model=TheBloke/zephyr-7B-beta-GGUF \
+  --prompt_type=zephyr \
+  --max_seq_len=4096
+```
+
+Or run with Llama 3.1:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q6_K_L.gguf?download=true \
+  --tokenizer_base_model=meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --max_seq_len=8192
+```
+
+You can also create a `run.sh` script:
+
+```bash
+#!/bin/bash
+python generate.py --base_model=TheBloke/zephyr-7B-beta-GGUF --prompt_type=zephyr --max_seq_len=4096
+```
+
+Then run it with `sh run.sh`.
+
+Open [http://localhost:7860](http://localhost:7860) in your browser after the server starts.
+
+## Verify Metal (M1/M2 only)
+
+Run the following to confirm PyTorch can use the Metal Performance Shaders backend:
+
+```python
+import torch
+if torch.backends.mps.is_available():
+    mps_device = torch.device("mps")
+    x = torch.ones(1, device=mps_device)
+    print(x)
+else:
+    print("MPS device not found.")
+```
+
+Expected output:
+```
+tensor([1.], device='mps:0')
+```
+
+## Troubleshooting
+
+**`ld: library not found for -lSystem`**
+
+```bash
+export LDFLAGS=-L/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib
+```
+
+Then retry your `pip install` commands from scratch.
+
+**Conda Rust issues**
+
+Install Rust natively instead:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Open a new shell, then verify:
+rustc --version
+```
+
+**Intel Mac: `clang: error: the clang compiler does not support '-march=native'`**
+
+Set `ARCHFLAGS` before installing:
+
+```bash
+ARCHFLAGS="-arch x86_64" pip install -r requirements.txt -c reqs_optional/reqs_constraints.txt
+```
+
+**`TypeError: Trying to convert BFloat16 to the MPS backend`**
+
+BFloat16 support requires macOS Sonoma (14.0) or later. On older macOS versions, pin PyTorch:
+
+```bash
+pip install -U torch==2.3.1
+pip install -U torchvision==0.18.1
+```

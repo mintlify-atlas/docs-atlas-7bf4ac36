@@ -1,0 +1,122 @@
+---
+title: "API overview"
+description: "h2oGPT exposes an OpenAI-compatible REST API served by a FastAPI server. Any client that works with the OpenAI API works with h2oGPT with a single base URL change."
+---
+
+## Starting the server
+
+The OpenAI-compatible server is enabled by default when you run `generate.py`. To be explicit, pass `--openai_server=True`:
+
+```bash
+python generate.py --openai_server=True
+```
+
+The server starts on port `5000` by default. On macOS, ports 5000 and 7000 are reserved by AirPlay, so the default shifts to port `5001`.
+
+To use a custom port:
+
+```bash
+python generate.py --openai_server=True --openai_port=14365
+```
+
+## Base URL
+
+```
+http://localhost:5000/v1
+```
+
+Replace `localhost` and `5000` with your server host and port. Both `http` and `https` are accepted when using a proxy or direct SSL configuration.
+
+## Authentication
+
+By default the server runs without API key enforcement. To require an API key:
+
+```bash
+python generate.py --enforce_h2ogpt_api_key=True --h2ogpt_api_keys="['your-secret-key']"
+```
+
+Keys can also be stored in a JSON file:
+
+```bash
+python generate.py --enforce_h2ogpt_api_key=True --h2ogpt_api_keys=h2ogpt_api_keys.json
+```
+
+Pass the key from client code as a standard Bearer token:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:5000/v1",
+    api_key="your-secret-key",
+)
+```
+
+If no key enforcement is configured, pass `api_key="EMPTY"` or any non-empty string.
+
+<Note>
+  Set `--enforce_h2ogpt_ui_key=True` to separately require authentication for the Gradio UI while keeping the API open, or vice versa.
+</Note>
+
+## Parallel workers
+
+To scale throughput, launch multiple isolated FastAPI worker processes:
+
+```bash
+python generate.py --openai_server=True --openai_workers=4
+```
+
+FastAPI handles concurrency and load balancing across all workers on the same IP and port.
+
+## Available endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/models` | List all loaded models |
+| `GET` | `/v1/models/{model}` | Get info for a specific model |
+| `POST` | `/v1/chat/completions` | Chat completions (streaming and non-streaming) |
+| `POST` | `/v1/completions` | Text completions |
+| `POST` | `/v1/embeddings` | Generate embedding vectors |
+| `POST` | `/v1/audio/transcriptions` | Speech-to-text (Whisper) |
+| `POST` | `/v1/audio/speech` | Text-to-speech |
+| `POST` | `/v1/images/generations` | Image generation |
+| `POST` | `/v1/files` | Upload files |
+| `GET` | `/v1/files` | List uploaded files |
+| `GET` | `/health` | Health check |
+| `GET` | `/version` | Server version |
+
+## Endpoint reference
+
+<CardGroup cols={2}>
+  <Card title="Chat completions" icon="message" href="/api/chat-completions">
+    `/v1/chat/completions` and `/v1/completions` — multi-turn chat, vision input, tool calling, JSON mode.
+  </Card>
+  <Card title="Embeddings" icon="vector-square" href="/api/embeddings">
+    `/v1/embeddings` — generate dense embedding vectors for text inputs.
+  </Card>
+  <Card title="Audio" icon="microphone" href="/api/audio">
+    `/v1/audio/transcriptions` and `/v1/audio/speech` — Whisper STT and TTS.
+  </Card>
+  <Card title="Images" icon="image" href="/api/images">
+    `/v1/images/generations` — generate images with sdxl_turbo, SD3, Flux, and more.
+  </Card>
+  <Card title="Gradio client" icon="python" href="/api/gradio-client">
+    Use the Gradio Python client to call h2oGPT APIs directly, including streaming and document Q&A.
+  </Card>
+</CardGroup>
+
+## h2oGPT-specific parameters
+
+In addition to standard OpenAI parameters, h2oGPT accepts extended parameters via `extra_body`. These map directly to h2oGPT's internal `evaluate()` parameters, for example:
+
+```python
+client_kwargs = dict(
+    model="h2oai/h2ogpt-4096-llama2-70b-chat",
+    max_tokens=200,
+    stream=False,
+    messages=[{"role": "user", "content": "Summarize this document."}],
+    extra_body=dict(langchain_mode="UserData", top_k_docs=5),
+)
+```
+
+See the [H2oGPTParams model](https://github.com/h2oai/h2ogpt/blob/main/openai_server/server.py) in `openai_server/server.py` for the complete list of accepted fields.

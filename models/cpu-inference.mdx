@@ -1,0 +1,178 @@
+---
+title: 'CPU inference'
+description: 'Run h2oGPT locally without a GPU using llama.cpp GGUF models or GPT4All on Linux, Windows, and macOS (including Apple Silicon).'
+---
+
+h2oGPT supports CPU-only inference via llama.cpp (GGUF models) and GPT4All. CPU inference is slower than GPU but requires no NVIDIA hardware and works on any machine.
+
+## llama.cpp / GGUF models
+
+GGUF is the quantized model format used by llama.cpp. It is the recommended approach for CPU inference. Models are available in multiple quantization levels (e.g. Q4_K_M, Q5_K_M, Q6_K) — higher Q values mean better quality but larger file size and slower inference.
+
+### Quick start with LLaMa-2 7B
+
+<Steps>
+  <Step title="Download the GGUF model">
+    ```bash
+    wget https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf
+    ```
+  </Step>
+  <Step title="Run with h2oGPT">
+    With documents in a `user_path` folder:
+    ```bash
+    python generate.py \
+      --base_model=llama \
+      --prompt_type=llama2 \
+      --score_model=None \
+      --langchain_mode=UserData \
+      --user_path=user_path
+    ```
+  </Step>
+</Steps>
+
+### Loading a GGUF model from a URL
+
+You can pass a HuggingFace download URL directly via `--model_path_llama`:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf \
+  --score_model=None \
+  --langchain_mode=UserData \
+  --user_path=user_path
+```
+
+### Low-memory and slow CPU settings
+
+For machines with limited RAM or slow CPUs, reduce memory locking and batch size, and limit the context window:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf \
+  --llamacpp_dict="{'use_mlock':False,'n_batch':256}" \
+  --max_seq_len=512 \
+  --score_model=None \
+  --langchain_mode=UserData \
+  --user_path=user_path
+```
+
+Key options via `--llamacpp_dict`:
+
+| Option | Description |
+|---|---|
+| `use_mlock` | Lock model in RAM (set `False` to allow paging) |
+| `n_batch` | Prompt processing batch size (lower = less RAM pressure) |
+| `n_gpu_layers` | Number of layers to offload to GPU (0 = CPU only) |
+
+### Controlling context length
+
+Pass `--max_seq_len` to set a smaller context window for faster CPU processing:
+
+```bash
+python generate.py --base_model=llama --max_seq_len=2048
+```
+
+If `--max_seq_len` is not set, h2oGPT uses a large default value that will be slow on CPU.
+
+### LLaMa-3 and models with chat templates
+
+For models that use a HuggingFace chat template (LLaMa-3, Phi-3, etc.), pass the HF tokenizer alongside the GGUF file to ensure accurate prompting:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf \
+  --tokenizer_base_model=meta-llama/Meta-Llama-3-8B-Instruct \
+  --max_seq_len=8192
+```
+
+For Phi-3:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --llama_cpp_model=https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf \
+  --tokenizer_base_model=microsoft/Phi-3-mini-4k-instruct \
+  --max_seq_len=4096
+```
+
+## GPT4All models
+
+GPT4All provides a simple interface for running quantized models without managing GGUF files manually. Models download automatically at runtime into `.cache`.
+
+Browse available models at the [GPT4All model explorer](https://gpt4all.io/index.html).
+
+<Tabs>
+  <Tab title="GPT-J model">
+    ```bash
+    python generate.py \
+      --base_model=gptj \
+      --model_path_gptj=ggml-gpt4all-j-v1.3-groovy.bin \
+      --score_model=None \
+      --langchain_mode=UserData \
+      --user_path=user_path
+    ```
+  </Tab>
+  <Tab title="LLaMa-based GPT4All">
+    ```bash
+    python generate.py \
+      --base_model=gpt4all_llama \
+      --model_name_gpt4all_llama=ggml-wizardLM-7B.q4_2.bin \
+      --score_model=None \
+      --langchain_mode=UserData \
+      --user_path=user_path
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The `gptj` model often produces no output even outside h2oGPT. The `gpt4all_llama` variant is generally more reliable for CPU inference.
+</Note>
+
+## macOS Apple Silicon (M1 / M2 Metal)
+
+llama.cpp supports Metal acceleration on Apple Silicon. h2oGPT runs GGUF models with MPS (Metal Performance Shaders) on M1 and M2 chips, offering significant speedups over pure CPU execution.
+
+Install h2oGPT following the [macOS installation guide](/installation/macos). When `llama-cpp-python` is compiled with Metal support, MPS acceleration is used automatically.
+
+<Tip>
+On Apple Silicon, GGUF models at Q4_K_M or Q5_K_M quantization provide a good balance of speed and quality for Metal inference.
+</Tip>
+
+## Building llama.cpp with CPU optimizations
+
+The llama.cpp build can be tuned for your CPU architecture using `CMAKE_ARGS`. The following example enables AVX2 and AVX-512 for modern x86_64 CPUs:
+
+```bash
+CMAKE_ARGS="-DLLAMA_AVX2=ON -DLLAMA_F16C=ON -DLLAMA_FMA=ON" pip install llama-cpp-python
+```
+
+For macOS Metal:
+
+```bash
+CMAKE_ARGS="-DLLAMA_METAL=ON" pip install llama-cpp-python
+```
+
+For CPU-only (no CUDA, no Metal):
+
+```bash
+CMAKE_ARGS="-DLLAMA_CUBLAS=OFF" pip install llama-cpp-python
+```
+
+<Warning>
+Once `llama-cpp-python` is compiled with CUDA support, it will not work in CPU-only mode. If you switch between GPU and CPU environments, maintain separate Python environments or reinstall the package with the appropriate `CMAKE_ARGS`.
+</Warning>
+
+## Memory requirements
+
+Approximate RAM required for GGUF models at common quantization levels:
+
+| Model size | Q4_K_M | Q5_K_M | Q6_K |
+|---|---|---|---|
+| 7B | ~4.1 GB | ~4.8 GB | ~5.5 GB |
+| 13B | ~7.5 GB | ~8.7 GB | ~10.1 GB |
+| 70B | ~38 GB | ~44 GB | ~51 GB |
+
+For additional low-memory strategies, see the [Low Memory section in the FAQ](https://github.com/h2oai/h2ogpt/blob/main/docs/FAQ.md#low-memory-mode).

@@ -1,0 +1,258 @@
+---
+title: 'Offline mode'
+description: 'Run h2oGPT fully offline by pre-downloading models, disabling telemetry, and setting gradio_offline_level.'
+---
+
+h2oGPT can operate in fully air-gapped environments with no outbound internet access. This requires downloading all required models and assets in advance and setting the appropriate offline flags at startup.
+
+## Quick start
+
+<Tabs>
+  <Tab title="Smart download (recommended)">
+    Run h2oGPT online once to let it download the model automatically, then go offline:
+
+    ```bash
+    # Online — download the model
+    python generate.py \
+      --base_model=TheBloke/zephyr-7B-beta-GGUF \
+      --prompt_type=zephyr \
+      --max_seq_len=4096 \
+      --add_disk_models_to_ui=False
+
+    # Offline — run using the downloaded file directly
+    TRANSFORMERS_OFFLINE=1 python generate.py \
+      --base_model=zephyr-7b-beta.Q5_K_M.gguf \
+      --prompt_type=zephyr \
+      --gradio_offline_level=2 \
+      --share=False \
+      --add_disk_models_to_ui=False
+    ```
+
+    Alternatively, specify the model via `--model_path_llama`:
+
+    ```bash
+    TRANSFORMERS_OFFLINE=1 python generate.py \
+      --base_model=llama \
+      --model_path_llama=zephyr-7b-beta.Q5_K_M.gguf \
+      --prompt_type=zephyr \
+      --gradio_offline_level=2 \
+      --share=False \
+      --add_disk_models_to_ui=False
+    ```
+  </Tab>
+  <Tab title="Manual download">
+    Download the GGUF file directly and place it in `llamacpp_path/`:
+
+    ```bash
+    # Online — download the model file manually
+    wget "https://huggingface.co/TheBloke/zephyr-7B-beta-GGUF/resolve/main/zephyr-7b-beta.Q5_K_M.gguf?download=true" \
+      -O llamacpp_path/zephyr-7b-beta.Q5_K_M.gguf
+
+    # Offline — run using the local file
+    TRANSFORMERS_OFFLINE=1 python generate.py \
+      --base_model=zephyr-7b-beta.Q5_K_M.gguf \
+      --prompt_type=zephyr \
+      --gradio_offline_level=2 \
+      --share=False \
+      --add_disk_models_to_ui=False
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  For non-HuggingFace model formats (GGUF, GPTQ, etc.), you must specify the exact filename. h2oGPT cannot resolve a HuggingFace hub name to a local file without internet access.
+</Warning>
+
+## The `--gradio_offline_level` flag
+
+| Value | Behavior |
+|---|---|
+| `0` (default) | Normal operation — downloads fonts and external assets |
+| `1` | Backend offline only — fonts still load from Google (better appearance) |
+| `2` | Fully air-gapped — replaces Google Fonts with local fallbacks |
+
+Use `--gradio_offline_level=2` for true air-gapped deployments. The UI fonts will look slightly different, but no outbound requests are made.
+
+<Note>
+  Gradio may still attempt to load `iframeResizer.contentWindow.min.js` from a CDN. This is non-blocking — h2oGPT works without it. A simple firewall rule is sufficient to block it.
+</Note>
+
+## Pre-loading all offline assets
+
+To prepare a complete offline bundle, run the following on an internet-connected machine of the same type as your offline target:
+
+```bash
+python generate.py \
+  --score_model=None \
+  --gradio_size=small \
+  --model_lock="[{'base_model': 'h2oai/h2ogpt-4096-llama2-7b-chat'}]" \
+  --save_dir=save_fastup_chat \
+  --prepare_offline_level=2 \
+  --add_disk_models_to_ui=False
+
+python -m nltk.downloader all
+playwright install --with-deps
+```
+
+This populates the following cache directories:
+
+- `~/.cache/selenium/`
+- `~/.cache/huggingface/`
+- `~/.cache/torch/`
+- `~/.cache/clip/`
+- `~/.cache/doctr/`
+- `~/.cache/chroma/`
+- `~/.cache/ms-playwright/`
+- `~/nltk_data/`
+
+Archive these directories and restore them on the offline machine.
+
+<Tip>
+  Use `--prepare_offline_level=1` if you only need h2oGPT itself and not the assets for vLLM or TGI inference servers. This significantly reduces the download size.
+</Tip>
+
+## Manually downloading individual models
+
+If you prefer to download only the specific models you need:
+
+<Accordion title="Base model and tokenizer">
+  ```python
+  from transformers import AutoTokenizer, AutoModelForCausalLM
+
+  model_name = 'h2oai/h2ogpt-oasst1-512-12b'
+  model = AutoModelForCausalLM.from_pretrained(model_name)
+  model.save_pretrained(model_name)
+  tokenizer = AutoTokenizer.from_pretrained(model_name)
+  tokenizer.save_pretrained(model_name)
+  ```
+
+  For GGUF files, download manually:
+
+  ```bash
+  wget https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf
+  ```
+
+  Then reference it with `--base_model=llama --model_path_llama=llama-2-7b-chat.Q6_K.gguf`.
+</Accordion>
+
+<Accordion title="Reward model">
+  Skip this step by passing `--score_model=None` to `generate.py`.
+
+  ```python
+  from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+  reward_model = 'OpenAssistant/reward-model-deberta-v3-large-v2'
+  model = AutoModelForSequenceClassification.from_pretrained(reward_model)
+  model.save_pretrained(reward_model)
+  tokenizer = AutoTokenizer.from_pretrained(reward_model)
+  tokenizer.save_pretrained(reward_model)
+  ```
+</Accordion>
+
+<Accordion title="Embedding model (for LangChain document Q&A)">
+  ```python
+  from langchain.embeddings import HuggingFaceEmbeddings
+
+  hf_embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+  embedding = HuggingFaceEmbeddings(
+      model_name=hf_embedding_model,
+      model_kwargs={"device": "cpu"},
+  )
+  ```
+</Accordion>
+
+<Accordion title="Tokenizers for HF inference server and OpenAI">
+  ```python
+  import tiktoken
+
+  encoding = tiktoken.get_encoding("cl100k_base")
+  encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+  ```
+</Accordion>
+
+<Accordion title="GPT-2 tokenizer for summarization">
+  ```python
+  from transformers import AutoTokenizer
+
+  tokenizer = AutoTokenizer.from_pretrained("gpt2")
+  tokenizer.save_pretrained("gpt2")
+  ```
+</Accordion>
+
+## Running in fully offline mode
+
+```bash
+HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python generate.py \
+  --base_model='h2oai/h2ogpt-oasst1-512-12b' \
+  --gradio_offline_level=2 \
+  --share=False
+```
+
+Always set `--prompt_type` explicitly when using absolute paths or GGUF files, since the prompt type lookup requires internet access to resolve HuggingFace model names.
+
+## Running vLLM offline
+
+Point vLLM at a local absolute path to avoid any HuggingFace hub calls:
+
+```bash
+python -m vllm.entrypoints.openai.api_server \
+  --port=5000 \
+  --host=0.0.0.0 \
+  --model "/home/user/.cache/huggingface/hub/models--meta-llama--Llama-2-13b-chat-hf/snapshots/c2f3ec81aac798ae26dcc57799a994dfbf521496" \
+  --tokenizer=hf-internal-testing/llama-tokenizer \
+  --tensor-parallel-size=1 \
+  --seed 1234 \
+  --max-num-batched-tokens=4096
+```
+
+Then connect h2oGPT to the local vLLM server:
+
+```bash
+python generate.py \
+  --inference_server="vllm:0.0.0.0:5000" \
+  --base_model='/home/user/.cache/huggingface/hub/models--meta-llama--Llama-2-13b-chat-hf/snapshots/c2f3ec81aac798ae26dcc57799a994dfbf521496' \
+  --score_model=None \
+  --prompt_type=llama2 \
+  --add_disk_models_to_ui=False
+```
+
+## Disabling telemetry
+
+h2oGPT automatically disables HuggingFace telemetry, Gradio telemetry, and ChromaDB PostHog in its core path. You can explicitly disable additional telemetry:
+
+### Disable h2oGPT UI analytics
+
+h2oGPT tracks which UI elements are clicked (no user inputs or data are included). To disable:
+
+```bash
+python generate.py --enable-heap-analytics=False
+```
+
+Or set the environment variable:
+
+```bash
+export H2OGPT_ENABLE_HEAP_ANALYTICS=False
+```
+
+### Fully disable ChromaDB telemetry
+
+If the documented ChromaDB options do not disable telemetry completely, patch the PostHog hook directly:
+
+```bash
+sp=$(python -c 'import site; print(site.getsitepackages()[0])')
+sed -i 's/posthog\.capture/return\n            posthog.capture/' $sp/chromadb/telemetry/posthog.py
+```
+
+<Note>
+  This patch is applied automatically by `linux_install.sh` and `linux_install_full.sh`.
+</Note>
+
+## Securing access
+
+To prevent unauthorized access to the Gradio server, either block the port via firewall or enable authentication:
+
+```bash
+python generate.py --auth=[('username','password')]
+```
+
+Run `python generate.py --help` for the full list of auth options.

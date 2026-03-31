@@ -1,0 +1,256 @@
+---
+title: 'GPU inference'
+description: 'Run h2oGPT models on NVIDIA GPUs using HuggingFace Transformers, bitsandbytes 8-bit/4-bit, AutoGPTQ, AutoAWQ, and exllama.'
+---
+
+HuggingFace Transformers models and llama.cpp GGUF models are supported via CUDA on Linux and via MPS on macOS.
+
+## Basic 8-bit loading
+
+The simplest way to run a model on GPU is with bitsandbytes 8-bit quantization. This roughly halves VRAM usage compared to full 16-bit precision:
+
+```bash
+python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b --load_8bit=True
+```
+
+For production use, a 12B+ model is recommended:
+
+```bash
+python generate.py --base_model=HuggingFaceH4/zephyr-7b-beta --load_8bit=True
+```
+
+Then open your browser at `http://0.0.0.0:7860` (Linux) or `http://localhost:7860` (Windows/macOS).
+
+<Note>
+For older GPUs, bitsandbytes 8-bit and 4-bit support may require downgrading: `pip uninstall bitsandbytes -y && pip install bitsandbytes==0.38.1`
+</Note>
+
+## 4-bit loading
+
+Pass `--load_4bit=True` for 4-bit NF4 quantization via bitsandbytes. This is supported for architectures including GPT-NeoX-20B, GPT-J, and LLaMa:
+
+```bash
+python generate.py --base_model=meta-llama/Llama-2-7b-chat-hf --load_4bit=True --prompt_type=llama2
+```
+
+### 8-bit vs 4-bit tradeoffs
+
+| Setting | VRAM reduction | Quality | Speed |
+|---|---|---|---|
+| `--load_8bit=True` | ~50% | Near full precision | Moderate |
+| `--load_4bit=True` | ~75% | Slight degradation | Moderate |
+| AutoGPTQ 4-bit | ~75% | Good (GPTQ-optimized) | Fast (with CUDA kernels) |
+| AutoAWQ 4-bit | ~75% | Good (AWQ-optimized) | Fast |
+
+## Memory requirements guidance
+
+Approximate VRAM requirements at different precisions:
+
+| Model size | FP16 | 8-bit | 4-bit / GPTQ |
+|---|---|---|---|
+| 7B | ~14 GB | ~7 GB | ~4–5 GB |
+| 13B | ~26 GB | ~13 GB | ~7–9 GB |
+| 70B | ~140 GB | ~70 GB | ~35–40 GB |
+
+See the [FAQ on larger models](https://github.com/h2oai/h2ogpt/blob/main/docs/FAQ.md#larger-models-require-more-gpu-memory) for detailed guidance.
+
+## AutoGPTQ
+
+AutoGPTQ provides pre-quantized 4-bit models with CUDA kernel acceleration. Use `--load_gptq` to specify the weight file name:
+
+<Warning>
+If you see `CUDA extension not installed` during loading, recompile the AutoGPTQ CUDA kernels. Without recompilation, generation will be significantly slower even when using a GPU.
+</Warning>
+
+<Steps>
+  <Step title="Run a 13B GPTQ model">
+    ```bash
+    python generate.py \
+      --base_model=TheBloke/Nous-Hermes-13B-GPTQ \
+      --score_model=None \
+      --load_gptq=model \
+      --use_safetensors=True \
+      --prompt_type=instruct \
+      --langchain_mode=UserData
+    ```
+    This uses approximately 9800 MB of VRAM. Add `--hf_embedding_model=sentence-transformers/all-MiniLM-L6-v2` to reduce to ~9340 MB.
+  </Step>
+  <Step title="Run LLaMa-2 7B GPTQ">
+    ```bash
+    python generate.py \
+      --base_model=TheBloke/Llama-2-7b-Chat-GPTQ \
+      --load_gptq=model \
+      --use_safetensors=True \
+      --prompt_type=llama2 \
+      --save_dir=save
+    ```
+  </Step>
+  <Step title="Run LLaMa-2 70B GPTQ (4-bit)">
+    ```bash
+    CUDA_VISIBLE_DEVICES=0 python generate.py \
+      --base_model=Llama-2-70B-chat-GPTQ \
+      --load_gptq=gptq_model-4bit--1g \
+      --use_safetensors=True \
+      --prompt_type=llama2 \
+      --save_dir=save
+    ```
+    Achieves approximately 12 tokens/sec.
+  </Step>
+</Steps>
+
+### GPTQ with RoPE scaling (extended context)
+
+To extend context beyond training length using RoPE scaling with GPTQ:
+
+```bash
+pip install transformers==4.31.0
+python generate.py \
+  --base_model=TheBloke/Llama-2-7b-Chat-GPTQ \
+  --load_gptq=model \
+  --use_safetensors=True \
+  --prompt_type=llama2 \
+  --score_model=None \
+  --rope_scaling="{'type':'dynamic', 'factor':4}" \
+  --max_max_new_tokens=15000 \
+  --max_new_tokens=15000 \
+  --max_time=12000
+```
+
+This configuration uses only ~5.5 GB of VRAM for a 7B model.
+
+<Note>
+HuggingFace Transformers does not directly support GPTQ with RoPE scaling. Only exllama supports AutoGPTQ with RoPE scaling. vLLM supports LLaMa-2 and AutoGPTQ but not RoPE scaling.
+</Note>
+
+## AutoAWQ
+
+AutoAWQ (activation-aware weight quantization) is another efficient 4-bit approach. Use `--load_awq`:
+
+<Tabs>
+  <Tab title="13B on 24 GB GPU">
+    ```bash
+    CUDA_VISIBLE_DEVICES=0 python generate.py \
+      --base_model=TheBloke/Llama-2-13B-chat-AWQ \
+      --score_model=None \
+      --load_awq=model \
+      --use_safetensors=True \
+      --prompt_type=llama2
+    ```
+    Uses approximately 14 GB of VRAM.
+  </Tab>
+  <Tab title="70B on 1×48 GB GPU">
+    ```bash
+    CUDA_VISIBLE_DEVICES=0 python generate.py \
+      --base_model=TheBloke/Llama-2-70B-chat-AWQ \
+      --score_model=None \
+      --load_awq=model \
+      --use_safetensors=True \
+      --prompt_type=llama2
+    ```
+    Uses approximately 39 GB of VRAM.
+  </Tab>
+  <Tab title="70B on 2×24 GB GPUs">
+    ```bash
+    CUDA_VISIBLE_DEVICES=2,3 python generate.py \
+      --base_model=TheBloke/Llama-2-70B-chat-AWQ \
+      --score_model=None \
+      --load_awq=model \
+      --use_safetensors=True \
+      --prompt_type=llama2
+    ```
+  </Tab>
+</Tabs>
+
+## Multi-GPU usage
+
+### Automatic multi-GPU with HuggingFace
+
+Set `--use_gpu_id=False` to let HuggingFace distribute the model across all available GPUs automatically:
+
+```bash
+pip install transformers==4.31.0
+python generate.py \
+  --base_model=meta-llama/Llama-2-70b-chat-hf \
+  --prompt_type=llama2 \
+  --rope_scaling="{'type': 'linear', 'factor': 4}" \
+  --use_gpu_id=False \
+  --save_dir=savemeta70b
+```
+
+Running on 4×A6000 gives about 4 tokens/sec, consuming ~35 GB per GPU.
+
+### Multi-GPU with exllama
+
+Use `--exllama_dict` to control GPU memory allocation explicitly across devices:
+
+```bash
+python generate.py \
+  --base_model=TheBloke/Llama-2-70B-chat-GPTQ \
+  --load_exllama=True \
+  --use_safetensors=True \
+  --use_gpu_id=False \
+  --load_gptq=main \
+  --prompt_type=llama2 \
+  --exllama_dict="{'set_auto_map':'20,20'}"
+```
+
+This splits the 70B model across 2 GPUs, each using 20 GB.
+
+## exllama
+
+[exllama](https://github.com/turboderp/exllama) is the only backend that supports AutoGPTQ with RoPE scaling. It is recommended for extended context inference on GPTQ models.
+
+```bash
+# LLaMa-2 7B with 16k context via RoPE scaling
+python generate.py \
+  --base_model=TheBloke/Llama-2-7b-Chat-GPTQ \
+  --load_gptq=model \
+  --use_safetensors=True \
+  --prompt_type=llama2 \
+  --save_dir=save \
+  --load_exllama=True \
+  --revision=gptq-4bit-32g-actorder_True \
+  --rope_scaling="{'alpha_value':4}"
+```
+
+```bash
+# LLaMa-2 70B on single A6000 (~48 GB, ~12 tokens/sec)
+python generate.py \
+  --base_model=TheBloke/Llama-2-70B-chat-GPTQ \
+  --load_gptq=gptq_model-4bit-128g \
+  --use_safetensors=True \
+  --prompt_type=llama2 \
+  --load_exllama=True \
+  --revision=main
+```
+
+<Warning>
+When using exllama, set `--concurrency_count=1`. The exllama backend shares model state and will produce mixed-up responses for concurrent requests if concurrency is greater than 1.
+</Warning>
+
+## llama.cpp on GPU
+
+By default, when loading a GGUF model, h2oGPT sets `n_gpu_layers` to a large value so that llama.cpp offloads all transformer layers to GPU for maximum performance:
+
+```bash
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --prompt_type=zephyr \
+  --score_model=None
+```
+
+Check startup logs to confirm all layers are offloaded:
+
+```text
+llama_model_load_internal: offloaded 35/35 layers to GPU
+```
+
+To partially offload (useful for low-VRAM GPUs), pass a specific layer count:
+
+```bash
+python generate.py --base_model=llama --llamacpp_dict="{'n_gpu_layers':20}"
+```
+
+<Note>
+Once `llama-cpp-python` is compiled with CUDA support, it no longer works in CPU-only mode. You will need a separate h2oGPT environment for CPU inference or reinstall `llama-cpp-python` without CUDA flags.
+</Note>

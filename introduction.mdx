@@ -1,0 +1,53 @@
+---
+title: "Introduction"
+description: "h2oGPT is an Apache 2.0 open-source platform for running private, local LLMs with document Q&A, voice, vision, and an OpenAI-compatible API."
+---
+
+h2oGPT lets you query and summarize your documents or chat with local private GPT LLMs entirely on your own hardware. No data leaves your network. It ships with a Gradio UI, a drop-in OpenAI-compatible API server, and support for dozens of model backends.
+
+## Key features
+
+- **Private and offline** — all inference runs locally; no data is sent to external servers unless you configure a remote backend
+- **Apache 2.0 license** — free for personal and commercial use
+- **OpenAI-compatible API** — h2oGPT acts as a drop-in replacement for the OpenAI server on `localhost:5000/v1`, with chat completions, embeddings, audio, image generation, and function tool calling
+- **Gradio UI** — streaming chat UI with multi-model bake-off, document upload, authentication, and state preservation
+- **Document Q&A** — persistent vector databases (Chroma, Weaviate, FAISS) over PDFs, Word, Excel, images, video frames, YouTube, audio, code, Markdown, and more
+- **Vision and image support** — understand images with LLaVA, Claude-3, Gemini-Pro-Vision, and GPT-4-Vision; generate images with Stable Diffusion (SDXL, SD3) and Flux
+- **Voice STT and TTS** — Whisper speech-to-text with streaming audio; Microsoft SpeechT5 and Coqui TTS with voice cloning
+- **Wide model support** — LLaMa 2/3, Mistral, Falcon, Vicuna, WizardLM, and others via HuggingFace Transformers, llama.cpp GGUF, AutoGPTQ, ExLLaMa, vLLM, TGI, and more
+- **Agents** — autonomous agents for web search, document Q&A, Python code execution, and CSV analysis
+- **Cross-platform** — Linux, macOS (CPU and Metal M1/M2), Windows 10/11, and Docker
+
+## Choose an installation method
+
+<CardGroup cols={2}>
+  <Card title="Docker" icon="docker" href="/installation/docker">
+    Recommended for Linux, Windows, and macOS. Provides full capabilities including GPU inference, vision, audio, and image generation without manual dependency management.
+  </Card>
+  <Card title="Linux" icon="linux" href="/installation/linux">
+    Native install on Ubuntu x86_64 using Miniconda and pip. Supports CUDA 12.1/11.8 and CPU modes.
+  </Card>
+  <Card title="Windows" icon="windows" href="/installation/windows">
+    Install on Windows 10/11 using a single `.bat` script with Miniconda, Visual Studio build tools, and optional CUDA support.
+  </Card>
+  <Card title="macOS" icon="apple" href="/installation/macos">
+    Native install for Apple Silicon (M1/M2 Metal MPS) and Intel Macs using Miniconda and pip.
+  </Card>
+</CardGroup>
+
+<Tip>
+  For the fastest path to a working setup on any platform, see the [Quick Start](/quickstart) guide.
+</Tip>
+
+## Architecture overview
+
+When you run `python generate.py`, h2oGPT starts two servers:
+
+- **Gradio UI** at `http://localhost:7860` — the interactive chat and document interface
+- **OpenAI-compatible API server** at `http://localhost:5000/v1` — a REST API that any OpenAI SDK client can connect to
+
+Both servers share the same model backend. You can run a local model (llama.cpp, HuggingFace Transformers, AutoGPTQ) or point h2oGPT at a remote inference server such as vLLM, TGI, oLLaMa, or the OpenAI API.
+
+<Note>
+  Some optional packages — DocTR, Unstructured, Florence-2, Stable Diffusion — download additional model weights at runtime. Progress is shown in the console.
+</Note>

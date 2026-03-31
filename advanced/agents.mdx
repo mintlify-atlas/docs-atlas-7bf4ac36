@@ -1,0 +1,172 @@
+---
+title: 'Agents'
+description: 'Use LangChain agents in h2oGPT for web search, Python execution, CSV analysis, AutoGPT, and multi-agent workflows.'
+---
+
+h2oGPT integrates several LangChain agent types that extend the LLM with tools for search, code execution, data analysis, and autonomous task planning. Agents work best with OpenAI models; some agent types are limited to OpenAI due to their reliance on function tool calling.
+
+## Available agent types
+
+<CardGroup cols={2}>
+  <Card title="Search" icon="magnifying-glass">
+    Web search agent. Works with non-OpenAI models after h2oGPT improvements beyond base LangChain.
+  </Card>
+  <Card title="Python" icon="code">
+    Executes Python code. Currently only supported with OpenAI models.
+  </Card>
+  <Card title="CSV" icon="table">
+    Analyzes CSV files. Works well with OpenAI due to function tool calling support.
+  </Card>
+  <Card title="JSON" icon="brackets-curly">
+    Queries and navigates JSON data. Alpha quality; currently requires OpenAI.
+  </Card>
+  <Card title="AutoGPT" icon="robot">
+    Autonomous goal-directed agent. Alpha quality. Supports a broad tool suite.
+  </Card>
+  <Card title="AutoGen" icon="users">
+    Multi-agent code execution framework via the OpenAI proxy server.
+  </Card>
+</CardGroup>
+
+<Note>
+  The Collection and Pandas agents are disabled or pre-alpha. Do not rely on them in production.
+</Note>
+
+## AutoGPT tools
+
+When you enable the AutoGPT agent, it has access to the following tools:
+
+<Accordion title="AutoGPT tool suite">
+  - **Search** — web search via SerpAPI or DuckDuckGo
+  - **Wikipedia** — direct Wikipedia lookups
+  - **Shell** — run shell commands
+  - **File** — read and write files
+  - **Python** — execute Python code
+  - **Requests** — make HTTP requests
+  - **Wolfram Alpha** — computational queries
+
+  AutoGPT also maintains a **memory** across tool calls within a session.
+</Accordion>
+
+## Enabling agents in the UI
+
+<Steps>
+  <Step title="Install agent dependencies">
+    ```bash
+    pip install -r reqs_optional/requirements_optional_agents.txt
+    ```
+  </Step>
+  <Step title="Set your SerpAPI key (optional)">
+    If you want web search, export your SerpAPI key before starting h2oGPT:
+    ```bash
+    export SERPAPI_API_KEY=your_key_here
+    ```
+    Without this key, web search falls back to DuckDuckGo.
+  </Step>
+  <Step title="Start h2oGPT">
+    ```bash
+    python generate.py --base_model=gpt-3.5-turbo
+    ```
+  </Step>
+  <Step title="Select an agent in the UI">
+    Open the **Resources** panel in the Gradio UI. Under **Agents**, select the agent type you want to use (e.g., Search, CSV). The Search agent also appears as a standalone option under **Resources**.
+  </Step>
+</Steps>
+
+## Code-first agents via the OpenAI proxy
+
+h2oGPT exposes an OpenAI-compatible proxy server on a separate port. Agents with the highest quality run against this endpoint.
+
+```python
+import openai
+
+client = openai.OpenAI(
+    base_url="http://localhost:5001/v1",  # h2oGPT OpenAI proxy port
+    api_key="EMPTY",
+)
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[{"role": "user", "content": "Search the web for the latest h2oGPT release."}],
+)
+print(response.choices[0].message.content)
+```
+
+<Tip>
+  See `openai_server/openai_client.py` in the h2oGPT repo for a full code-first agent example that generates plots, researches topics, and evaluates images via a vision model.
+</Tip>
+
+## Function tool calling
+
+h2oGPT supports OpenAI-compatible function tool calling with auto tool selection. This powers the CSV and JSON agents and lets you define custom tools:
+
+```python
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "City name"}
+                },
+                "required": ["city"],
+            },
+        },
+    }
+]
+
+response = client.chat.completions.create(
+    model="gpt-3.5-turbo",
+    messages=[{"role": "user", "content": "What is the weather in Austin?"}],
+    tools=tools,
+    tool_choice="auto",
+)
+```
+
+## AutoGen multi-agent
+
+AutoGen enables multi-agent code execution workflows. h2oGPT acts as the backend LLM via the OpenAI proxy:
+
+<Steps>
+  <Step title="Install AutoGen">
+    ```bash
+    pip install pyautogen
+    ```
+  </Step>
+  <Step title="Point AutoGen at the h2oGPT proxy">
+    ```python
+    import autogen
+
+    config_list = [
+        {
+            "model": "h2ogpt",
+            "base_url": "http://localhost:5001/v1",
+            "api_key": "EMPTY",
+        }
+    ]
+
+    assistant = autogen.AssistantAgent(
+        name="assistant",
+        llm_config={"config_list": config_list},
+    )
+
+    user_proxy = autogen.UserProxyAgent(
+        name="user_proxy",
+        human_input_mode="NEVER",
+        code_execution_config={"work_dir": "coding"},
+    )
+
+    user_proxy.initiate_chat(
+        assistant,
+        message="Write a Python script to fetch and plot BTC prices for the last 7 days.",
+    )
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  AutoGen code execution runs shell commands and Python on the host machine. Run it in an isolated environment or Docker container.
+</Warning>

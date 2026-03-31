@@ -1,0 +1,444 @@
+---
+title: 'Inference servers'
+description: 'Connect h2oGPT to remote inference backends including oLLaMa, HuggingFace TGI, vLLM, OpenAI, Azure OpenAI, Anthropic, MistralAI, Google, Groq, Gradio, Replicate, and AWS SageMaker.'
+---
+
+h2oGPT can use a remote inference server instead of loading a model locally. Pass `--inference_server` to `generate.py` with the appropriate server string, alongside `--base_model` to identify the model name (needed for prompt formatting).
+
+## Server string reference
+
+| Server type | `--inference_server` format |
+|---|---|
+| oLLaMa | `vllm_chat:http://localhost:11434/v1/` |
+| HF TGI | `http://<ip>:<port>` |
+| vLLM (completions) | `vllm:<ip>:<port>` |
+| vLLM (chat) | `vllm_chat:<ip>:<port>` |
+| OpenAI Chat | `openai_chat` |
+| OpenAI Text | `openai` |
+| Azure OpenAI | `openai_azure_chat:<deployment>:<base_url>:<api_version>` |
+| Anthropic | `anthropic` |
+| MistralAI | `mistralai` |
+| Google | `google` |
+| Groq | `groq` |
+| Replicate | `replicate:<model_string>` |
+| AWS SageMaker | `sagemaker_chat:<endpoint>:<region>` |
+| Gradio | `http://<ip>:<port>` |
+
+---
+
+## oLLaMa
+
+[oLLaMa](https://ollama.ai) exposes an OpenAI-compatible API endpoint that h2oGPT connects to via the `vllm_chat` server type.
+
+<Steps>
+  <Step title="Start the oLLaMa server">
+    ```bash
+    ollama run llama2
+    ```
+  </Step>
+  <Step title="Connect h2oGPT">
+    ```bash
+    python generate.py \
+      --base_model=llama2 \
+      --inference_server=vllm_chat:http://localhost:11434/v1/ \
+      --prompt_type=openai_chat \
+      --max_seq_len=4096
+    ```
+  </Step>
+</Steps>
+
+To run on specific GPUs, stop the oLLaMa system service first:
+
+```bash
+sudo systemctl stop ollama.service
+CUDA_VISIBLE_DEVICES=0 OLLAMA_HOST=0.0.0.0:11434 ollama serve &> ollama.log &
+ollama run mistral:v0.3
+```
+
+Then connect h2oGPT:
+
+```bash
+python generate.py \
+  --base_model=mistral:v0.3 \
+  --inference_server=vllm_chat:http://localhost:11434/v1/ \
+  --prompt_type=openai_chat \
+  --max_seq_len=8094
+```
+
+You can also configure the model entirely from the UI: start `python generate.py` with no arguments, then in the Models tab enter the model name and server URL, set `prompt_type` to `plain`, and set `max_seq_len` to `4096`.
+
+---
+
+## HuggingFace Text Generation Inference (TGI)
+
+HF TGI is a high-throughput inference server from HuggingFace. Docker is the recommended install method.
+
+<Tabs>
+  <Tab title="Docker (recommended)">
+    Install Docker and the NVIDIA container toolkit, then run the TGI image:
+
+    ```bash
+    # Falcon 7B on GPU 0
+    docker run --gpus device=0 --shm-size 2g -p 6112:80 \
+      -v $HOME/.cache/huggingface/hub/:/data \
+      ghcr.io/huggingface/text-generation-inference:latest \
+      --model-id h2oai/h2ogpt-gm-oasst1-en-2048-falcon-7b-v2 \
+      --max-input-length 2048 \
+      --max-total-tokens 4096 \
+      --sharded=false \
+      --disable-custom-kernels \
+      --trust-remote-code \
+      --max-stop-sequences=6
+    ```
+
+    ```bash
+    # 20B NeoX on 4 GPUs
+    docker run --gpus '"device=0,1,2,3"' --shm-size 2g -p 6112:80 \
+      -v $HOME/.cache/huggingface/hub/:/data \
+      ghcr.io/huggingface/text-generation-inference:latest \
+      --model-id h2oai/h2ogpt-oasst1-512-20b \
+      --max-input-length 2048 \
+      --max-total-tokens 4096 \
+      --sharded=true \
+      --num-shard=4 \
+      --disable-custom-kernels \
+      --trust-remote-code \
+      --max-stop-sequences=6
+    ```
+
+    ```bash
+    # LLaMa-2 70B on 4×A100 GPUs
+    export MODEL=meta-llama/Llama-2-70b-chat-hf
+    docker run -d --gpus '"device=0,1,2,3"' --shm-size 1g \
+      -e HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN \
+      -p 6112:80 \
+      -v $HOME/.cache/huggingface/hub/:/data \
+      ghcr.io/huggingface/text-generation-inference:0.9.3 \
+      --model-id $MODEL \
+      --max-input-length 4096 \
+      --max-total-tokens 8192 \
+      --max-stop-sequences 6 \
+      --sharded true \
+      --num-shard 4
+    ```
+  </Tab>
+  <Tab title="Local install (not recommended)">
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    source "$HOME/.cargo/env"
+
+    git clone https://github.com/huggingface/text-generation-inference.git
+    cd text-generation-inference
+
+    sudo apt-get install libssl-dev gcc -y
+
+    conda create -n textgen -y
+    conda activate textgen
+    conda install python=3.10 -y
+    export CUDA_HOME=/usr/local/cuda-11.7
+    BUILD_EXTENSIONS=True make install
+    cd server && make install install-flash-attention
+
+    NCCL_SHM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 \
+      text-generation-launcher \
+      --model-id h2oai/h2ogpt-oig-oasst1-512-6_9b \
+      --port 8080 \
+      --sharded false \
+      --trust-remote-code \
+      --max-stop-sequences=6
+    ```
+
+    Use `BUILD_EXTENSIONS=False` for GPUs below A100.
+  </Tab>
+</Tabs>
+
+### Connecting h2oGPT to TGI
+
+Once TGI is running (e.g. at `192.168.1.46:6112`), connect h2oGPT:
+
+```bash
+SAVE_DIR=./save/ python generate.py \
+  --inference_server="http://192.168.1.46:6112" \
+  --base_model=h2oai/h2ogpt-oasst1-512-12b
+```
+
+### Testing TGI
+
+```python
+from text_generation import Client
+
+client = Client("http://127.0.0.1:6112")
+print(client.generate("What is Deep Learning?", max_new_tokens=17).generated_text)
+```
+
+```bash
+curl 127.0.0.1:6112/generate \
+  -X POST \
+  -d '{"inputs":"<|prompt|>What is Deep Learning?<|endoftext|><|answer|>","parameters":{"max_new_tokens": 512, "truncate": 1024, "do_sample": true, "temperature": 0.1, "repetition_penalty": 1.2}}' \
+  -H 'Content-Type: application/json'
+```
+
+---
+
+## vLLM
+
+vLLM provides an OpenAI-compatible API server with high throughput via PagedAttention. It requires CUDA 12.1+ for best results.
+
+<Steps>
+  <Step title="Create a vLLM environment">
+    ```bash
+    conda create -n vllm -y
+    conda activate vllm
+    conda install python=3.10 -y
+    sudo apt update && sudo apt install libnccl2 libnccl-dev
+    ```
+  </Step>
+  <Step title="Install vLLM">
+    ```bash
+    export CUDA_HOME=/usr/local/cuda-12.1
+    export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu121"
+    pip install vllm
+    ```
+  </Step>
+  <Step title="Start the vLLM server">
+    ```bash
+    # LLaMa-2 70B on 4 GPUs
+    export NCCL_IGNORE_DISABLED_P2P=1
+    export CUDA_VISIBLE_DEVICES=0,1,2,3
+    python -m vllm.entrypoints.openai.api_server \
+      --port=5000 \
+      --host=0.0.0.0 \
+      --model h2oai/h2ogpt-4096-llama2-70b-chat \
+      --tokenizer=hf-internal-testing/llama-tokenizer \
+      --tensor-parallel-size=4 \
+      --seed 1234 \
+      --max-num-batched-tokens=8192
+    ```
+  </Step>
+  <Step title="Connect h2oGPT">
+    ```bash
+    python generate.py \
+      --inference_server="vllm:0.0.0.0:5000" \
+      --base_model=h2oai/h2ogpt-oasst1-falcon-40b \
+      --langchain_mode=UserData
+    ```
+  </Step>
+</Steps>
+
+### Mixtral 8×7B with vLLM
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1
+python -m vllm.entrypoints.openai.api_server \
+  --port=5002 \
+  --host=0.0.0.0 \
+  --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
+  --seed 1234 \
+  --max-num-batched-tokens=65536 \
+  --tensor-parallel-size=2
+```
+
+<Note>
+`vllm_chat` (ChatCompletion) is not supported by the vLLM project. Use `vllm` (completions) instead. If you add `https://` or `http://` as a prefix to the vLLM IP, also append `/v1` to the full address.
+</Note>
+
+<Warning>
+vLLM >= 0.5.0 requires a CUDA driver version >= 12.4. If your driver is older, use `vllm/vllm-openai:v0.4.2` instead of `:latest`.
+</Warning>
+
+### vLLM AWQ example (Docker)
+
+```bash
+mkdir -p $HOME/.cache/huggingface/hub
+docker run -d \
+  --runtime=nvidia \
+  --gpus '"device=0,1"' \
+  --shm-size=10.24gb \
+  -p 5000:5000 \
+  -e HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN \
+  -v "${HOME}"/.cache:$HOME/.cache/ \
+  --network host \
+  vllm/vllm-openai:latest \
+    --port=5000 \
+    --host=0.0.0.0 \
+    --model=h2oai/h2ogpt-4096-llama2-70b-chat-4bit \
+    --tensor-parallel-size=2 \
+    --seed 1234 \
+    --trust-remote-code \
+    --max-num-batched-tokens 8192 \
+    --quantization awq \
+    --download-dir=/workspace/.cache/huggingface/hub
+```
+
+---
+
+## Cloud provider APIs
+
+<Tabs>
+  <Tab title="OpenAI">
+    Set the `OPENAI_API_KEY` environment variable, then:
+
+    ```bash
+    OPENAI_API_KEY=<key> python generate.py \
+      --inference_server=openai_chat \
+      --base_model=gpt-3.5-turbo \
+      --h2ocolors=False \
+      --langchain_mode=UserData
+    ```
+
+    <Warning>
+    OpenAI is not recommended for private document Q&A — document chunks are sent to OpenAI's servers. Use it for testing or when privacy is not required.
+    </Warning>
+  </Tab>
+  <Tab title="Azure OpenAI">
+    ```bash
+    OPENAI_API_KEY=<key> python generate.py \
+      --inference_server="openai_azure_chat:<deployment_name>:<base_url>:<api_version>" \
+      --base_model=gpt-3.5-turbo \
+      --h2ocolors=False \
+      --langchain_mode=UserData
+    ```
+
+    `<deployment_name>` is required; other fields can be set to `None` or left empty between `:` separators.
+  </Tab>
+  <Tab title="Anthropic">
+    Set `ANTHROPIC_API_KEY`, then:
+
+    ```bash
+    python generate.py \
+      --inference_server=anthropic \
+      --base_model=claude-3-opus-20240229
+    ```
+
+    Other Claude models: `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`.
+  </Tab>
+  <Tab title="MistralAI">
+    ```bash
+    python generate.py --model_lock="[{'inference_server':'mistralai', 'base_model':'mistral-medium'}]"
+    ```
+  </Tab>
+  <Tab title="Google (Gemini)">
+    Set `GOOGLE_API_KEY`, then:
+
+    ```bash
+    python generate.py --model_lock="[{'inference_server':'google', 'base_model':'gemini-pro'}]"
+    ```
+  </Tab>
+  <Tab title="Groq">
+    Set `GROQ_API_KEY`, then:
+
+    ```bash
+    python generate.py --model_lock="[{'inference_server':'groq', 'base_model':'mixtral-8x7b-32768'}]"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Gradio server-to-server
+
+You can connect h2oGPT as a client to another h2oGPT Gradio server. Start a server:
+
+```bash
+SAVE_DIR=./save/ python generate.py --base_model=h2oai/h2ogpt-oasst1-512-12b
+```
+
+Then connect a second h2oGPT instance to it:
+
+```bash
+python generate.py \
+  --inference_server="http://192.168.0.10:7680" \
+  --base_model=h2oai/h2ogpt-oasst1-falcon-40b
+```
+
+Gradio live share links (`https://*.gradio.live`) and ngrok tunnels also work as the `--inference_server` value.
+
+If the `prompt_type` is not automatically detected, pass it explicitly:
+
+```bash
+python generate.py \
+  --inference_server="http://192.168.0.10:7680" \
+  --base_model=foo_model \
+  --prompt_type=llama2
+```
+
+---
+
+## Replicate
+
+Set `REPLICATE_API_TOKEN`, install the package, and pass the Replicate model string:
+
+```bash
+pip install replicate
+export REPLICATE_API_TOKEN=<key>
+
+python generate.py \
+  --inference_server="replicate:lucataco/llama-2-7b-chat:6ab580ab4eef2c2b440f2441ec0fc0ace5470edaf2cbea50b8550aec0b3fbd38" \
+  --base_model="TheBloke/Llama-2-7b-Chat-GPTQ"
+```
+
+<Note>
+Replicate is not recommended for private document Q&A — only chunks of documents are sent to the LLM, but those chunks leave your infrastructure. It is sufficient when full privacy is not required.
+</Note>
+
+---
+
+## AWS SageMaker
+
+h2oGPT integrates with AWS SageMaker endpoints. Set your AWS credentials and pass the endpoint name and region:
+
+```bash
+export AWS_ACCESS_KEY_ID=<...>
+export AWS_SECRET_ACCESS_KEY=<...>
+
+python generate.py \
+  --inference_server=sagemaker_chat:<endpointname>:<region> \
+  --base_model=h2oai/h2ogpt-4096-llama2-7b-chat
+```
+
+<Note>
+Streaming is not yet supported for the LangChain SageMaker integration.
+</Note>
+
+---
+
+## Locking multiple models
+
+Use `--model_lock` to start h2oGPT with multiple inference servers active simultaneously. This enables side-by-side model comparison:
+
+```bash
+python generate.py --model_lock="[
+  {'inference_server':'http://192.168.1.46:6112','base_model':'h2oai/h2ogpt-oasst1-512-12b'},
+  {'inference_server':'http://192.168.1.46:6114','base_model':'h2oai/h2ogpt-oasst1-512-20b'},
+  {'inference_server':'openai_chat','base_model':'gpt-3.5-turbo'}
+]" --model_lock_columns=3
+```
+
+<Tip>
+No spaces are allowed inside the double-quoted `--model_lock` argument due to CLI argument parsing. Use single quotes inside the JSON-like structure.
+</Tip>
+
+### Selecting visible models at startup
+
+```bash
+export vis="['h2oai/h2ogpt-4096-llama2-70b-chat','HuggingFaceH4/zephyr-7b-alpha','gpt-3.5-turbo-0613']"
+python generate.py \
+  --model_lock="$MODEL_LOCK" \
+  --visible_models="$vis"
+```
+
+---
+
+## In-app model management
+
+When running h2oGPT, you can add and switch models without restarting. In the **Models** tab:
+
+1. Enter the model name (same as `--base_model`) and server URL (same as `--inference_server`).
+2. Click **Add new Model, Lora, Server url:port**.
+3. Select the model from the dropdown and click **Load-Unload**.
+
+Click **Load Model Names from Server** to auto-populate model names from compatible inference servers (vLLM, oLLaMa, etc.).
+
+<Note>
+`--base_model` is always required on the CLI. It is not auto-populated even when connecting to a server that exposes a model list endpoint.
+</Note>

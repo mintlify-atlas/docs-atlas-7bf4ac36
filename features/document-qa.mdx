@@ -1,0 +1,301 @@
+---
+title: "Document Q&A"
+description: "Upload documents, build vector databases, and ask questions over your private document collections using h2oGPT's LangChain integration."
+---
+
+h2oGPT integrates with LangChain to provide private, offline document question-answering. Documents are chunked, embedded, and stored in a vector database. At query time, relevant chunks are retrieved and passed to the LLM as context.
+
+## Supported file types
+
+### Native document types
+
+These formats are ingested directly without optional dependencies:
+
+`.pdf`, `.txt`, `.csv`, `.toml`, `.py`, `.rst`, `.rtf`, `.md`, `.html`, `.mhtml`, `.htm`, `.docx`, `.doc`, `.xlsx`, `.xls`, `.enex`, `.eml`, `.epub`, `.odt`, `.pptx`, `.ppt`, `.xml`
+
+### Image types (optional)
+
+When vision/OCR dependencies are installed, h2oGPT can extract text from images:
+
+`.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.tiff`, `.tif`, `.svg`, `.psd`, and many more (over 50 image formats via Pillow).
+
+### Audio and video (optional)
+
+`.mp4`, `.mpeg`, `.mpg`, `.mp3`, `.ogg`, `.flac`, `.aac`, `.au`
+
+Audio and video files are transcribed using Whisper before being stored in the database.
+
+### Meta types
+
+| Type | Description |
+|------|-------------|
+| `.zip` | Archive containing any native data type. |
+| `.urls` | Plain text file with one URL per line; each URL is fetched and ingested. |
+
+### UI input sources
+
+Beyond file uploads, the UI also accepts:
+
+- **URL** — Any `http://` or `https://` address. h2oGPT fetches and parses the page.
+- **ArXiv** — Enter an ArXiv identifier such as `arXiv:1706.03762`.
+- **Text** — Paste raw text directly into the UI.
+
+<Note>
+  If you upload a zip file that contains images or PDFs to be processed by DocTR or Florence-2, upload the zip separately. Uploading it alongside other files triggers a CUDA multiprocessing error in forked subprocesses.
+</Note>
+
+## Vector databases
+
+h2oGPT supports several vector database backends. Choose one by passing `--db_type` to `generate.py` or `make_db.py`.
+
+<Tabs>
+  <Tab title="Chroma (default)">
+    Chroma is the default. No extra flags are required.
+
+    ```bash
+    python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+      --langchain_mode=UserData
+    ```
+
+    Chroma stores its files in `db_dir_UserData/` by default. It supports filtering by document, making it the most feature-complete option for the h2oGPT UI.
+  </Tab>
+  <Tab title="FAISS">
+    Install the GPU or CPU FAISS extras first:
+
+    ```bash
+    # GPU
+    pip install -r reqs_optional/requirements_optional_gpu_only.txt
+
+    # CPU
+    pip install -r reqs_optional/requirements_optional_cpu_only.txt
+    ```
+
+    Then pass `--db_type=faiss`:
+
+    ```bash
+    python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+      --langchain_mode=UserData \
+      --db_type=faiss
+    ```
+
+    <Warning>
+      FAISS does not support document subset filtering in h2oGPT. The "Select Subset of Document(s)" UI control has no effect when using FAISS.
+    </Warning>
+  </Tab>
+  <Tab title="Weaviate">
+    Install the LangChain extras:
+
+    ```bash
+    pip install -r reqs_optional/requirements_optional_langchain.txt
+    ```
+
+    Start Weaviate with Docker:
+
+    ```bash
+    curl -o docker-compose.yml \
+      "https://configuration.weaviate.io/v2/docker-compose/docker-compose.yml?modules=standalone&runtime=docker-compose&weaviate_version=v1.19.6"
+    docker compose up -d
+    ```
+
+    Run h2oGPT pointing at your Weaviate instance:
+
+    ```bash
+    WEAVIATE_URL=http://localhost:8080 python generate.py \
+      --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+      --langchain_mode=UserData \
+      --db_type=weaviate
+    ```
+
+    Weaviate supports hybrid (keyword + vector) search out of the box. For authenticated instances, also set `WEAVIATE_USERNAME`, `WEAVIATE_PASSWORD`, and optionally `WEAVIATE_SCOPE`.
+
+    <Note>
+      Connecting to Weaviate Cloud Services (WCS) is intentionally not supported — it would send your documents to a third party.
+    </Note>
+  </Tab>
+  <Tab title="Qdrant">
+    Install the LangChain extras:
+
+    ```bash
+    pip install -r reqs_optional/requirements_optional_langchain.txt
+    ```
+
+    Run h2oGPT with Qdrant:
+
+    ```bash
+    QDRANT_URL=http://localhost:6333 QDRANT_API_KEY="<key>" \
+    python generate.py \
+      --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+      --langchain_mode=UserData \
+      --db_type=qdrant
+    ```
+
+    Qdrant's Python client also supports in-memory instances for prototyping, which is the default when no `QDRANT_URL` is set.
+
+    Available environment variables:
+
+    | Variable | Description |
+    |----------|-------------|
+    | `QDRANT_URL` | Host or fully qualified URL, e.g. `http://localhost:6333` |
+    | `QDRANT_PORT` | REST API port. Default: `6333` |
+    | `QDRANT_GRPC_PORT` | gRPC port. Default: `6334` |
+    | `QDRANT_API_KEY` | API key for Qdrant Cloud authentication |
+    | `QDRANT_HTTPS` | Set to `true` to use HTTPS |
+    | `QDRANT_PATH` | Persistence path for local Qdrant, e.g. `h2o_data/qdrant` |
+  </Tab>
+</Tabs>
+
+## Uploading documents via the UI
+
+<Steps>
+  <Step title="Select a collection">
+    In the left sidebar under **Resources → Collections**, choose where uploaded documents will be stored. For a shared persistent collection use **UserData**; for a private temporary collection use **MyData**.
+  </Step>
+  <Step title="Upload files">
+    Click the upload area on the main chat panel or navigate to the **Document Selection** tab and drag-drop files there. The UI shows progress in stdout during parallel ingestion.
+  </Step>
+  <Step title="Wait for ingestion">
+    Embedding runs on GPU if available. The **Doc Counts** field updates when ingestion is complete.
+  </Step>
+  <Step title="Query your documents">
+    Type a question in the chat input. Make sure the collection is selected and **Database Subset** is set to `Relevant`, then click **Submit**.
+  </Step>
+</Steps>
+
+## Building a collection from the CLI
+
+Use `src/make_db.py` to build or update a vector database outside of the running chatbot.
+
+### Build a new database
+
+```bash
+python src/make_db.py
+python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+  --langchain_mode=UserData
+```
+
+### Add documents to an existing database
+
+```bash
+python src/make_db.py --add_if_exists=True
+python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+  --langchain_mode=UserData
+```
+
+### Download and use example databases
+
+```bash
+python src/make_db.py --download_some=True
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --langchain_mode=UserData \
+  --langchain_modes="['UserData', 'wiki', 'MyData', 'github h2oGPT', 'DriverlessAI docs']"
+```
+
+### Build multiple collections with different embeddings
+
+You can maintain separate collections indexed with different embedding models:
+
+```bash
+python src/make_db.py \
+  --user_path=user_path \
+  --collection_name=UserData \
+  --langchain_type=shared \
+  --hf_embedding_model=BAAI/bge-large-en-v1.5
+
+python src/make_db.py \
+  --user_path=user_path2 \
+  --collection_name=UserData2 \
+  --langchain_type=shared \
+  --hf_embedding_model=sentence-transformers/all-MiniLM-L6-v2
+```
+
+Then launch with both collections available:
+
+```bash
+python generate.py \
+  --base_model='llama' \
+  --prompt_type=llama2 \
+  --langchain_mode='UserData' \
+  --langchain_modes=['UserData','UserData2'] \
+  --langchain_mode_paths={'UserData':'user_path','UserData2':'user_path2'} \
+  --langchain_mode_types={'UserData':'shared','UserData2':'shared'} \
+  --model_path_llama=https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf \
+  --max_seq_len=4096
+```
+
+### Limit ingestion to specific file types
+
+```python
+import sys
+sys.path.append('src')
+from src.gpt_langchain import get_supported_types
+non_image_types, image_types, video_types = get_supported_types()
+print(non_image_types)
+```
+
+Pass the result to `--selected_file_types`:
+
+```bash
+python src/make_db.py \
+  --user_path="/home/user/data" \
+  --collection_name=VAData \
+  --enable_pdf_ocr='off' \
+  --selected_file_types="['pdf', 'html', 'htm']"
+```
+
+## HYDE (Hypothetical Document Embeddings)
+
+HYDE improves retrieval for vague or underspecified questions. Instead of embedding the raw user query, h2oGPT first asks the LLM to generate a hypothetical answer, then embeds that answer to find better-matching document chunks.
+
+- **HYDE Level 0** — Normal retrieval: embed the user's query directly.
+- **HYDE Level 1+** — Perform one or more HYDE iterations before the final retrieval step.
+
+Set the HYDE level in the **Expert** tab under **Document Control → HYDE Level**, or pass a default via the API.
+
+The HYDE prompt used for the first iteration is configurable in the Expert tab under **HYDE LLM Prompt**.
+
+## Semantic chunking
+
+When a GPU is available, h2oGPT can use semantic chunking to split documents at meaningful boundaries rather than fixed token counts. This generally improves retrieval accuracy for long documents.
+
+Semantic chunking is enabled automatically when GPU resources are present. Disable it or tune it in the **Expert** tab under **Document Control**.
+
+## Embedding models
+
+The embedding model converts text chunks into vectors for similarity search. h2oGPT uses a single embedding model per collection — you cannot mix embeddings within one database.
+
+| Model | Default for | Notes |
+|-------|-------------|-------|
+| `instructor-large` | GPU | Most accurate. Produces a flat score distribution, so reference scores appear high. |
+| `all-MiniLM-L6-v2` | CPU | Faster, lower memory. Sharper score distribution; references are more intuitive. |
+| `BAAI/bge-large-en-v1.5` | Recommended for PDF-heavy workloads | Good accuracy/speed tradeoff. |
+| `BAAI/bge-small-en-v1.5` | Speed-optimized | Useful for large PDF ingest pipelines. |
+| `BAAI/bge-m3` | Multilingual | Higher memory usage; set `CHROMA_MAX_BATCH_SIZE=1` if GPU runs out of memory. |
+
+Override the embedding model at runtime:
+
+```bash
+python generate.py --base_model=h2oai/h2ogpt-oig-oasst1-512-6_9b \
+  --langchain_mode=UserData \
+  --hf_embedding_model=BAAI/bge-large-en-v1.5
+```
+
+Or when building the database:
+
+```bash
+python src/make_db.py \
+  --hf_embedding_model=BAAI/bge-small-en-v1.5
+```
+
+## Key `generate.py` flags
+
+| Flag | Description |
+|------|-------------|
+| `--langchain_mode` | Default collection to use on startup (e.g. `UserData`, `MyData`, `LLM`). |
+| `--langchain_modes` | List of collections to expose in the UI. |
+| `--user_path` | Directory to scan for documents when building or updating `UserData`. |
+| `--hf_embedding_model` | HuggingFace model ID or TEI endpoint for embeddings. |
+| `--db_type` | Vector database backend: `chroma` (default), `faiss`, `weaviate`, `qdrant`. |
+| `--allow_upload_to_user_data` | Allow UI uploads to the shared `UserData` collection. |
+| `--allow_upload_to_my_data` | Allow UI uploads to the private `MyData` collection. |
+| `--pre_load_embedding_model` | Load the embedding model at startup for faster first ingestion. |

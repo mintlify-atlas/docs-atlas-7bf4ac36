@@ -1,0 +1,343 @@
+---
+title: 'Troubleshooting'
+description: 'Solutions for common errors in h2oGPT, including CUDA failures, memory issues, Docker problems, and known bugs.'
+---
+
+## Common errors
+
+<AccordionGroup>
+  <Accordion title="UI loads forever / blank screen in Chrome">
+    Check the Chrome developer console. If you see:
+
+    ```text
+    Failed to load resource: the server responded with a status of 404 (Not Found)
+    127.0.0.1/:1 Uncaught (in promise) TypeError: Failed to fetch dynamically imported module:
+    http://127.0.0.1:7860/custom_component/c866d1d814ade494ac522de29fd71dcd/component/index.js
+    ```
+
+    **Fix:** Delete your Chrome browser cache and reload.
+  </Accordion>
+
+  <Accordion title="TypeError: Chroma.init() got an unexpected keyword argument 'anonymized_telemetry'">
+    This means the wrong version of `langchain` or `chromadb` is installed.
+
+    **Fix:** Check `requirements.txt` for the correct pinned version and reinstall:
+
+    ```bash
+    pip install langchain==<correct_version> chromadb==<correct_version>
+    ```
+  </Accordion>
+
+  <Accordion title="ValueError: offload — weights offloaded to disk">
+    ```text
+    The current `device_map` had weights offloaded to the disk. Please provide an
+    `offload_folder` for them. Alternatively, make sure you have `safetensors` installed
+    if the model you are using offers the weights in this format.
+    ```
+
+    **Cause:** Insufficient GPU or CPU memory for the model. A 6.9B model requires a minimum of 27 GB free memory in full precision.
+
+    **Fix:** Use a quantized model (GGUF, AWQ, GPTQ, or 4-bit bitsandbytes), or reduce `--max_seq_len`.
+  </Accordion>
+
+  <Accordion title="CUDA error 704 — peer access already enabled (multi-GPU GGUF)">
+    ```text
+    CUDA error 704 at ggml-cuda.cu:6998: peer access is already enabled
+    current device: 0
+    ```
+
+    **Cause:** Known bug in `llama.cpp` on some multi-GPU systems.
+
+    **Fix:** Restrict to a single GPU:
+
+    ```bash
+    export CUDA_VISIBLE_DEVICES=0
+    ```
+  </Accordion>
+
+  <Accordion title="GGML version mismatch — 'Is this really a GGML file?'">
+    ```text
+    llama.cpp: loading model from ./models/7B/ggml-model-q4_0.bin
+    error loading model: unknown (magic, version) combination: 67676a74, 00000003;
+    is this really a GGML file?
+    llama_init_from_file: failed to load model
+    ```
+
+    **Cause:** The model was quantized with an older version 2 format, but the current `llama-cpp-python` only supports version 3.
+
+    **Fix option 1:** Downgrade `llama-cpp-python` to the version that supports the old format:
+
+    ```bash
+    pip install --force-reinstall --ignore-installed --no-cache-dir llama-cpp-python==0.1.73
+    ```
+
+    **Fix option 2:** Use the GPT4All loader instead:
+
+    ```bash
+    python generate.py \
+      --base_model=gpt4all_llama \
+      --model_path_gpt4all_llama=./models/7B/ggml-model-q4_0.bin
+    ```
+  </Accordion>
+
+  <Accordion title="Assertion failed: srcIndex < srcSelectDimSize (distilgpt2 and similar)">
+    ```text
+    ../aten/src/ATen/native/cuda/Indexing.cu:1093: indexSelectSmallIndex: block: [4,0,0],
+    thread: [0,0,0] Assertion `srcIndex < srcSelectDimSize` failed.
+    ```
+
+    **Cause:** The model does not support sequences longer than its embedding size. `distilgpt2` is a known example.
+
+    **Fix:** Enable truncation:
+
+    ```bash
+    python generate.py --base_model=distilgpt2 --truncation_generation=True
+    ```
+  </Accordion>
+
+  <Accordion title="CPU memory error — 'not enough memory: you tried to allocate N bytes'">
+    ```text
+    RuntimeError: DefaultCPUAllocator: not enough memory: you tried to allocate 590938112 bytes.
+    ```
+
+    **Cause:** Insufficient CPU RAM to load the model.
+
+    **Fix:** Switch to a GGUF/GGML model, which can stream weights from disk with minimal RAM.
+  </Accordion>
+</AccordionGroup>
+
+## GPU/CUDA issues
+
+<AccordionGroup>
+  <Accordion title="vLLM fails with 'cuda>=12.4' driver requirement error">
+    ```text
+    nvidia-container-cli: requirement error: unsatisfied condition: cuda>=12.4,
+    please update your driver to a newer version, or use an earlier cuda container: unknown.
+    ```
+
+    **Cause:** vLLM >= 0.5.0 requires a CUDA driver version of 12.4 or higher.
+
+    **Fix option 1:** Update your NVIDIA driver to support CUDA 12.4+.
+
+    **Fix option 2:** Pin vLLM to an older image that supports your current driver:
+
+    ```text
+    vllm/vllm-openai:v0.4.2
+    ```
+  </Accordion>
+
+  <Accordion title="bitsandbytes CUDA Setup failed despite GPU being available">
+    ```text
+    CUDA Setup failed despite GPU being available. Please run the following command
+    to get more information:
+        python -m bitsandbytes
+    Inspect the output and see if you can locate CUDA libraries. You might need to
+    add them to your LD_LIBRARY_PATH.
+    ```
+
+    **Cause:** The installed CUDA version is incompatible with the `bitsandbytes` version.
+
+    **Fix:** Check and select the correct CUDA alternative on Ubuntu:
+
+    ```bash
+    sudo update-alternatives --display cuda
+    sudo update-alternatives --config cuda
+    ```
+
+    bitsandbytes 0.39.0 is the last version that supports CUDA 12.1. Either upgrade `bitsandbytes` to match your CUDA version, or uninstall it to disable 4-bit/8-bit support:
+
+    ```bash
+    pip uninstall bitsandbytes
+    ```
+  </Accordion>
+
+  <Accordion title="llama.cpp + XTTS audio streaming: 'CUDA error: an illegal memory access was encountered'">
+    ```text
+    CUDA error: an illegal memory access was encountered
+    ```
+
+    **Cause:** Since `llama_cpp_python` >= 0.2.76, thread safety is degraded. Concurrent XTTS audio streaming and GGUF token streaming can cause this crash.
+
+    <Warning>Do not use the XTTS model (`tts_models/multilingual/multi-dataset/xtts_v2`) simultaneously with a llama.cpp GGUF model if audio streaming is active.</Warning>
+
+    h2oGPT has a built-in workaround that serializes these operations, but it adds latency.
+
+    **Fix option 1:** Use an inference server (vLLM, Ollama, etc.) instead of llama.cpp directly.
+
+    **Fix option 2:** Downgrade `llama_cpp_python` to 0.2.26:
+
+    ```bash
+    pip uninstall llama_cpp_python llama_cpp_python_cuda -y
+    export GGML_CUDA=1
+    export CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=all"
+    export FORCE_CMAKE=1
+    pip install llama_cpp_python==0.2.26 --no-cache-dir
+    ```
+  </Accordion>
+
+  <Accordion title="Heterogeneous GPU peer-to-peer errors">
+    On systems with non-identical GPUs, you may see NCCL peer-to-peer errors.
+
+    **Fix:** Disable P2P by setting this environment variable before launching h2oGPT:
+
+    ```bash
+    export NCCL_P2P_LEVEL=LOC
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Memory issues
+
+<AccordionGroup>
+  <Accordion title="Pinned memory error: 'failed to allocate N MB of pinned memory: out of memory'">
+    ```text
+    Warning: failed to VirtualLock 17825792-byte buffer (after previously locking
+    1407303680 bytes): The paging file is too small for this operation to complete.
+
+    WARNING: failed to allocate 258.00 MB of pinned memory: out of memory
+    ```
+
+    **Cause:** Insufficient pinned (page-locked) GPU memory.
+
+    **Fix:** Disable CUDA pinned memory allocation before launching h2oGPT.
+
+    On Linux:
+
+    ```bash
+    export GGML_CUDA_NO_PINNED=1
+    ```
+
+    On Windows:
+
+    ```bash
+    setenv GGML_CUDA_NO_PINNED=1
+    ```
+  </Accordion>
+
+  <Accordion title="TEI returns '413 Payload Too Large'">
+    ```text
+    requests.exceptions.HTTPError: 413 Client Error: Payload Too Large for url: http://localhost:5555/
+    ```
+
+    **Cause:** The batch size sent to the Text Embedding Inference server exceeds `--max-batch-tokens`. This is common on smaller GPUs like the Tesla T4.
+
+    **Fix:** Reduce the batch size via the `TEI_MAX_BATCH_SIZE` environment variable:
+
+    ```bash
+    TEI_MAX_BATCH_SIZE=128 python generate.py \
+      --hf_embedding_model=tei:http://localhost:5555 \
+      --cut_distance=10000
+    ```
+
+    Note: `client_batch_size × 512` must be less than or equal to `--max-batch-tokens`.
+  </Accordion>
+
+  <Accordion title="Ollama running slowly — 'cudaMalloc failed: out of memory'">
+    If Ollama seems slow, check `ollama.log` for:
+
+    ```text
+    cudaMalloc failed: out of memory
+    ```
+
+    **Cause:** Another process is occupying GPU memory and Ollama has fallen back to CPU.
+
+    **Fix:** Identify and stop the process consuming GPU memory, then restart Ollama. Use `nvidia-smi` to inspect GPU memory usage:
+
+    ```bash
+    nvidia-smi
+    ```
+  </Accordion>
+
+  <Accordion title="'The model OptimizedModule is not supported' warning">
+    ```text
+    The model 'OptimizedModule' is not supported for <task>. Supported models are ...
+    ```
+
+    **Cause:** This is a benign warning from the transformers library about the scoring model.
+
+    **Fix:** This warning can be safely ignored. To suppress it entirely, disable the scoring model:
+
+    ```bash
+    python generate.py --score_model=None
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Docker issues
+
+<AccordionGroup>
+  <Accordion title="Gradio fails across pods in Kubernetes (nginx / multi-pod)">
+    Gradio 4.x does not support multi-pod Kubernetes deployments. A Gradio client on one pod cannot reach a Gradio server on a separate pod.
+
+    <Warning>This is a known limitation in Gradio 4.x upstream. See [gradio#6920](https://github.com/gradio-app/gradio/issues/6920) and [gradio#7317](https://github.com/gradio-app/gradio/issues/7317).</Warning>
+
+    **Fix:** Downgrade to Gradio 3.50.2:
+
+    ```bash
+    pip uninstall gradio gradio_client gradio_pdf -y
+    pip install gradio==3.50.2
+    ```
+
+    If you experience OS-level crashes (OOM killer), use 3.50.1 instead:
+
+    ```bash
+    pip uninstall gradio gradio_client gradio_pdf -y
+    pip install gradio==3.50.1
+    ```
+  </Accordion>
+
+  <Accordion title="vLLM Docker container fails to start due to driver version">
+    Refer to the vLLM driver error at the top of this page. When pinning a vLLM Docker image, also verify that the `--shm-size` is large enough for your model (10+ GB is typical for large models).
+
+    Example working Docker run for a 70B model on 4 GPUs:
+
+    ```bash
+    docker run -d \
+      --runtime=nvidia \
+      --gpus '"device=0,1,2,3"' \
+      --shm-size=10.24gb \
+      -p 5000:5000 \
+      -e HUGGING_FACE_HUB_TOKEN=$HUGGING_FACE_HUB_TOKEN \
+      --network host \
+      vllm/vllm-openai:latest \
+        --port=5000 \
+        --host=0.0.0.0 \
+        --model=h2oai/h2ogpt-4096-llama2-70b-chat \
+        --tensor-parallel-size=4 \
+        --seed 1234 \
+        --trust-remote-code \
+        --max-num-batched-tokens 8192
+    ```
+  </Accordion>
+
+  <Accordion title="llama-cpp-python fails to install on CentOS">
+    The default GCC version on CentOS is too old to compile `llama-cpp-python`.
+
+    **Fix:** Install `devtoolset-11` and use GCC 11:
+
+    ```bash
+    yum remove gcc gdb
+    sudo yum install scl-utils centos-release-scl
+    yum install -y devtoolset-11-toolchain
+    # Add to /etc/profile:
+    PATH=$PATH:/opt/rh/devtoolset-11/root/usr/bin
+    export PATH
+    sudo scl enable devtoolset-11 bash
+
+    export FORCE_CMAKE=1
+    export CMAKE_ARGS=-DLLAMA_OPENBLAS=on
+    pip install llama-cpp-python --no-cache-dir
+    ```
+  </Accordion>
+
+  <Accordion title="Security warning: key files accessible via Gradio's allowed_paths">
+    <Warning>If you place API key files in the working directory (`.`) and do not set `GPT_H2O_AI=1`, those files may be accessible via the Gradio file serving endpoint because h2oGPT sets `allowed_paths` to include `.` by default.</Warning>
+
+    **Fix:** Store key files outside the working directory and use a symlink, or set `GPT_H2O_AI=1` to enable public-instance mode which restricts file access.
+
+    ```bash
+    export GPT_H2O_AI=1
+    export H2OGPT_H2OGPT_API_KEYS="/secret_location/h2ogpt_api_keys.json"
+    ```
+  </Accordion>
+</AccordionGroup>

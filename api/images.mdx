@@ -1,0 +1,156 @@
+---
+title: "Image generation"
+description: "Generate images from text prompts using diffusion models loaded in h2oGPT. The endpoint follows the OpenAI images API."
+---
+
+## Endpoint
+
+`POST /v1/images/generations`
+
+## Prerequisites
+
+Start h2oGPT with image generation enabled and at least one image model pre-loaded:
+
+```bash
+python generate.py \
+  --enable_image=True \
+  --pre_load_image_audio_models=True \
+  "--visible_image_models=['sdxl_turbo']"
+```
+
+Multiple models can be passed as a list:
+
+```bash
+"--visible_image_models=['sdxl_turbo', 'sdxl', 'flux']"
+```
+
+## Request parameters
+
+<ParamField body="model" type="string" default="">
+  The image generation model to use. When empty or omitted, h2oGPT uses the first available loaded model. See [supported models](#supported-models) below.
+</ParamField>
+
+<ParamField body="prompt" type="string" required>
+  Text description of the image to generate.
+</ParamField>
+
+<ParamField body="n" type="number" default="1">
+  Number of images to generate.
+</ParamField>
+
+<ParamField body="size" type="string" default="1024x1024">
+  Dimensions of the generated image in `"WxH"` format. Accepted values depend on the model; `"1024x1024"` works for most.
+</ParamField>
+
+<ParamField body="quality" type="string" default="standard">
+  Quality preset. Accepted value: `"standard"`.
+</ParamField>
+
+<ParamField body="response_format" type="string" default="b64_json">
+  How to return the image data. `"b64_json"` returns a base64-encoded JSON string; `"url"` returns a data URI.
+</ParamField>
+
+<ParamField body="guidance_scale" type="number">
+  Classifier-free guidance scale. Controls how closely the output follows the prompt. Defaults are model-dependent.
+</ParamField>
+
+<ParamField body="num_inference_steps" type="number">
+  Number of denoising steps. Higher values increase quality at the cost of latency. Defaults are model-dependent.
+</ParamField>
+
+## Response
+
+<ResponseField name="created" type="number">
+  Unix timestamp of when the images were generated.
+</ResponseField>
+
+<ResponseField name="data" type="object[]">
+  Array of generated image objects.
+
+  <Expandable title="properties">
+    <ResponseField name="b64_json" type="string">
+      Base64-encoded image data. Present when `response_format="b64_json"`.
+    </ResponseField>
+    <ResponseField name="url" type="string">
+      Data URI of the image. Present when `response_format="url"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Examples
+
+<CodeGroup>
+
+```python Python
+from openai import OpenAI
+import base64
+import io
+from PIL import Image
+
+client = OpenAI(
+    base_url="http://localhost:5000/v1",
+    api_key="EMPTY",
+)
+
+response = client.images.generate(
+    model="sdxl_turbo",  # leave empty to use the first loaded model
+    prompt="A cute baby sea otter",
+    n=1,
+    size="1024x1024",
+    response_format="b64_json",
+)
+
+image_data = base64.b64decode(response.data[0].b64_json.encode("utf-8"))
+image = Image.open(io.BytesIO(image_data))
+image.save("output_image.png")
+image.show()
+```
+
+```bash curl
+curl http://localhost:5000/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer EMPTY" \
+  -d '{
+    "model": "sdxl_turbo",
+    "prompt": "A cute baby sea otter",
+    "n": 1,
+    "size": "1024x1024",
+    "response_format": "b64_json"
+  }'
+```
+
+</CodeGroup>
+
+## Supported models
+
+The following model identifiers are recognized. Pass the identifier as the `model` parameter or use it in `--visible_image_models` at startup.
+
+| Model | Notes |
+|-------|-------|
+| `sdxl_turbo` | Fast single-step generation. Good for rapid iteration. |
+| `sdxl` | Full SDXL pipeline. Higher quality, slower than `sdxl_turbo`. |
+| `SD3` | Stable Diffusion 3. Requires a HuggingFace access token. |
+| `playv2` | PlaygroundAI v2. |
+| `flux` | Flux diffusion model. |
+
+<Tip>
+  If you do not know which model is loaded, omit the `model` field or set it to an empty string. h2oGPT will select the first available image model.
+</Tip>
+
+## Decoding the response
+
+When using `response_format="b64_json"`:
+
+```python
+import base64, io
+from PIL import Image
+
+b64_string = response.data[0].b64_json
+image_bytes = base64.b64decode(b64_string.encode("utf-8"))
+image = Image.open(io.BytesIO(image_bytes))
+image.save("result.png")
+```
+
+When using `response_format="url"`, the value is a `data:image/jpg;base64,...` URI that can be set directly as an `<img>` `src` attribute or decoded with `base64.b64decode`.

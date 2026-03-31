@@ -1,0 +1,165 @@
+---
+title: "Embeddings"
+description: "Generate dense embedding vectors for text using h2oGPT's loaded embedding model. The endpoint follows the OpenAI embeddings API."
+---
+
+## Endpoint
+
+`POST /v1/embeddings`
+
+## Prerequisites
+
+h2oGPT must be started with LangChain enabled (any `--langchain_mode` other than `Disabled`) and the embedding model pre-loaded:
+
+```bash
+python generate.py \
+  --langchain_mode=UserData \
+  --pre_load_embedding_model=True
+```
+
+To use a specific HuggingFace embedding model instead of the default, add:
+
+```bash
+  --hf_embedding_model=sentence-transformers/all-MiniLM-L6-v2 \
+  --use_openai_embedding=False
+```
+
+<Note>
+  The `model` field in the request is accepted for API compatibility but is currently ignored. h2oGPT always uses the single embedding model it was started with.
+</Note>
+
+## Request parameters
+
+<ParamField body="input" type="string | string[]" required>
+  Text string or array of text strings to embed. Each string is embedded independently. Arrays return one embedding object per input element.
+</ParamField>
+
+<ParamField body="model" type="string">
+  Accepted for compatibility but unused. The server uses whichever embedding model was loaded at startup.
+</ParamField>
+
+<ParamField body="encoding_format" type="string" default="float">
+  Output encoding: `"float"` returns a list of floating-point numbers; `"base64"` returns a base64-encoded string.
+</ParamField>
+
+<ParamField body="user" type="string">
+  Optional user identifier.
+</ParamField>
+
+## Response
+
+<ResponseField name="object" type="string">
+  Always `"list"`.
+</ResponseField>
+
+<ResponseField name="data" type="object[]">
+  Array of embedding objects, one per input string.
+
+  <Expandable title="properties">
+    <ResponseField name="index" type="number">
+      Position of this embedding in the input array.
+    </ResponseField>
+    <ResponseField name="object" type="string">
+      Always `"embedding"`.
+    </ResponseField>
+    <ResponseField name="embedding" type="number[]">
+      The dense embedding vector. Dimensionality depends on the loaded model.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  The model identifier used.
+</ResponseField>
+
+<ResponseField name="usage" type="object">
+  Token usage with `prompt_tokens` and `total_tokens`.
+</ResponseField>
+
+---
+
+## Examples
+
+### Single string
+
+<CodeGroup>
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:5000/v1",
+    api_key="EMPTY",
+)
+
+response = client.embeddings.create(
+    input="Your text string goes here",
+    model="text-embedding-3-small",  # value is ignored; kept for compatibility
+)
+
+print(response.data[0].embedding)
+```
+
+```bash curl
+curl http://localhost:5000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer EMPTY" \
+  -d '{
+    "input": "Your text string goes here",
+    "model": "text-embedding-3-small"
+  }'
+```
+
+</CodeGroup>
+
+### Batch of strings
+
+<CodeGroup>
+
+```python Python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:5000/v1",
+    api_key="EMPTY",
+)
+
+response = client.embeddings.create(
+    input=[
+        "Your text string goes here",
+        "Another text string goes here",
+    ],
+    model="text-embedding-3-small",
+)
+
+print(response.data[0].embedding)
+print(response.data[1].embedding)
+```
+
+```bash curl
+curl http://localhost:5000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer EMPTY" \
+  -d '{
+    "input": [
+      "Your text string goes here",
+      "Another text string goes here"
+    ],
+    "model": "text-embedding-3-small"
+  }'
+```
+
+</CodeGroup>
+
+## Supported embedding models
+
+The embedding model is configured at server startup. Common choices include:
+
+| Model | Notes |
+|-------|-------|
+| `hkunlp/instructor-large` | Default HuggingFace embedding model |
+| `sentence-transformers/all-MiniLM-L6-v2` | Fast, lightweight |
+| `sentence-transformers/all-mpnet-base-v2` | Higher quality |
+| OpenAI embeddings | Set `--use_openai_embedding=True` and provide `OPENAI_API_KEY` |
+
+Pass the desired model at startup with `--hf_embedding_model=<model-name>`.

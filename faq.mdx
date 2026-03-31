@@ -1,0 +1,499 @@
+---
+title: 'Frequently asked questions'
+description: 'Answers to common questions about h2oGPT installation, models, document Q&A, API integration, and performance tuning.'
+---
+
+## Installation & setup
+
+<AccordionGroup>
+  <Accordion title="How do I run h2oGPT with a LLaMa-3 or chat-template-based model?">
+    LLaMa-3 and other newer models use a HuggingFace chat template. Pass the model name directly and h2oGPT will detect the correct template automatically:
+
+    ```bash
+    python generate.py --base_model=meta-llama/Meta-Llama-3-8B-Instruct
+    ```
+
+    For GGUF versions, pass the HuggingFace tokenizer separately to ensure accurate prompting:
+
+    ```bash
+    python generate.py \
+      --base_model=llama \
+      --model_path_llama=https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf?download=true \
+      --tokenizer_base_model=meta-llama/Meta-Llama-3-8B-Instruct \
+      --max_seq_len=8192
+    ```
+
+    To run fully offline after the first download:
+
+    ```bash
+    TRANSFORMERS_OFFLINE=1 python generate.py \
+      --base_model=llama \
+      --model_path_llama=Meta-Llama-3-8B-Instruct.Q5_K_M.gguf \
+      --tokenizer_base_model=meta-llama/Meta-Llama-3-8B-Instruct \
+      --max_seq_len=8192 \
+      --gradio_offline_level=2 \
+      --share=False \
+      --add_disk_models_to_ui=False
+    ```
+  </Accordion>
+
+  <Accordion title="How do I control where model files are stored?">
+    Use the following environment variables to customize cache locations:
+
+    - `HUGGINGFACE_HUB_CACHE` — HuggingFace model hub cache (default: `~/.cache/huggingface/hub`)
+    - `TRANSFORMERS_CACHE` — HuggingFace transformers cache (default: `~/.cache/huggingface/transformers`)
+    - `HF_HOME` — Broad location for any HF objects
+    - `XDG_CACHE_HOME` — Broadly any `~/.cache` items
+    - `--llamacpp_path=<location>` — CLI flag for llama.cpp / GGUF model files
+  </Accordion>
+
+  <Accordion title="How do I set a Hugging Face access token?">
+    There are two independent ways to authenticate with Hugging Face. Choose one:
+
+    **Environment variable:**
+    ```bash
+    export HUGGING_FACE_HUB_TOKEN=hf_...
+    ```
+
+    **CLI login:**
+    ```bash
+    huggingface-cli login
+    ```
+    Then pass `--use_auth_token=True` when starting h2oGPT:
+    ```bash
+    python generate.py --use_auth_token=True ...
+    ```
+  </Accordion>
+
+  <Accordion title="What environment variables can I use to configure h2oGPT?">
+    Key environment variables:
+
+    | Variable | Description |
+    |---|---|
+    | `SAVE_DIR` | Local directory to save logs |
+    | `ADMIN_PASS` | Password for system info and log access |
+    | `HUGGING_FACE_HUB_TOKEN` | HF token for private models |
+    | `LANGCHAIN_MODE` | LangChain mode override |
+    | `CUDA_VISIBLE_DEVICES` | Comma-separated list of CUDA device IDs to expose |
+    | `CONCURRENCY_COUNT` | Number of concurrent Gradio users (1 is fastest for single GPU) |
+    | `ALLOW_API` | Whether API access is permitted |
+    | `H2OGPT_BASE_PATH` | Base folder for all non-personal files |
+    | `LLAMACPP_PATH` | Directory for llama.cpp URL downloads |
+
+    Any `generate.py` CLI argument `--foo_bar=value` can also be set as `H2OGPT_FOO_BAR=value`.
+  </Accordion>
+
+  <Accordion title="How do I use h2oGPT purely as an LLM controller without embeddings or GPU?">
+    Disable all GPU-dependent components and pass an external inference server:
+
+    ```bash
+    CUDA_VISIBLE_DEVICES= python generate.py \
+      --score_model=None \
+      --enable_tts=False \
+      --enable_sst=False \
+      --enable_transcriptions=False \
+      --embedding_gpu_id=cpu \
+      --hf_embedding_model=fake \
+      --base_model=HuggingFaceH4/zephyr-7b-beta \
+      --inference_server=vllm://100.0.0.1:5000
+    ```
+
+    In Docker, use `--gpus none` instead of the env var.
+  </Accordion>
+</AccordionGroup>
+
+## Models & hardware
+
+<AccordionGroup>
+  <Accordion title="How do I load a model with 4-bit or 8-bit quantization?">
+    For 4-bit quantization (requires at least ~9 GB GPU memory):
+
+    ```bash
+    python generate.py --base_model=HuggingFaceH4/zephyr-7b-beta --load_4bit=True
+    ```
+
+    For 8-bit quantization, use `--load_8bit=True`. GGUF models provide the most control over GPU offloading and work on both CPU and GPU.
+  </Accordion>
+
+  <Accordion title="How do I use multiple GPUs?">
+    Enable automatic sharding with `--use_gpu_id=False`. Select specific GPU IDs via `CUDA_VISIBLE_DEVICES`:
+
+    ```bash
+    export CUDA_VISIBLE_DEVICES="0,3"
+    python generate.py \
+      --base_model=meta-llama/Llama-2-7b-chat-hf \
+      --prompt_type=llama2 \
+      --use_gpu_id=False \
+      --score_model=None
+    ```
+
+    Note: `--use_gpu_id=False` is disabled by default because in rare cases torch can hit a `cuda:x cuda:y mismatch` bug.
+
+    For models and tasks that use separate GPU assignments (embedding, captioning, ASR, etc.):
+
+    ```bash
+    python generate.py \
+      --embedding_gpu_id=0 \
+      --caption_gpu_id=1 \
+      --doctr_gpu_id=2 \
+      --asr_gpu_id=3
+    ```
+  </Accordion>
+
+  <Accordion title="What are the low-memory mode options?">
+    Combine these flags to reduce GPU memory usage:
+
+    - Use quantized models: GGUF, AWQ, GPTQ, or bitsandbytes 4-bit
+    - Run embedding on CPU: `--pre_load_embedding_model=True --embedding_gpu_id=cpu`
+    - Use a smaller embedding model: `--hf_embedding_model=BAAI/bge-base-en-v1.5 --cut_distance=10000`
+    - Disable scoring: `--score_model=None`
+    - Disable speech features: `--enable_tts=False --enable_stt=False --enable_transcriptions=False`
+    - Limit sequence length: `--max_seq_len=4096`
+    - For GGUF, limit GPU layers: `--n_gpu_layers=10`
+    - Reduce document chunks in context: `--top_k_docs=3`
+
+    Example middle-ground command for a single GPU:
+
+    ```bash
+    CUDA_VISIBLE_DEVICES=0 python generate.py \
+      --score_model=None \
+      --base_model=https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf \
+      --prompt_type=mistral \
+      --max_seq_len=2048 \
+      --max_new_tokens=128 \
+      --top_k_docs=3 \
+      --pre_load_embedding_model=True \
+      --embedding_gpu_id=cpu \
+      --cut_distance=10000 \
+      --hf_embedding_model=BAAI/bge-base-en-v1.5
+    ```
+  </Accordion>
+
+  <Accordion title="How do I run T5 or sequence-to-sequence models?">
+    Pass `--force_seq2seq_type=True` or `--force_t5_type=True`:
+
+    ```bash
+    python generate.py \
+      --base_model=CohereForAI/aya-101 \
+      --load_4bit=True \
+      --add_disk_models_to_ui=False \
+      --force_seq2seq_type=True
+    ```
+
+    Note: `CohereForAI/aya-101` is already auto-detected as a T5 conditional model.
+  </Accordion>
+
+  <Accordion title="How do I add a custom prompt template for a new model?">
+    **Option 1 — CLI custom prompt:**
+
+    ```bash
+    python generate.py \
+      --base_model=TheBloke/openchat_3.5-GGUF \
+      --prompt_type=custom \
+      --prompt_dict="{'PreInstruct': 'GPT4 User: ', 'PreResponse': 'GPT4 Assistant:', 'terminate_response': ['GPT4 Assistant:', '<|end_of_turn|>'], 'chat_sep': '<|end_of_turn|>', 'chat_turn_sep': '<|end_of_turn|>', 'humanstr': 'GPT4 User: ', 'botstr': 'GPT4 Assistant:'}"
+    ```
+
+    **Option 2 — edit source code:**
+
+    1. Add a new key/value to `prompt_type_to_model_name` in `prompter.py`
+    2. Add a new enum entry in `enums.py`
+    3. Add a new block in `get_prompt()` in `prompter.py`
+
+    You can inspect the active prompt template in the UI: **Models tab → right sidebar → Current or Custom Model Prompt**.
+  </Accordion>
+</AccordionGroup>
+
+## Document Q&A
+
+<AccordionGroup>
+  <Accordion title="How do I control the quality and speed of document parsing?">
+    For PDFs, h2oGPT uses PyMuPDF by default and falls back to DocTR, unstructured, and HTML parsing. Control each parser:
+
+    - `--use_unstructured_pdf='auto'` — set `'off'` to disable, `'on'` to force
+    - `--use_pypdf='auto'`
+    - `--enable_pdf_ocr='auto'`
+    - `--enable_pdf_doctr='auto'`
+    - `--try_pdf_as_html='auto'`
+
+    For maximum quality (may create some redundant chunks):
+
+    ```bash
+    python generate.py --max_quality=True
+    ```
+
+    Or select **Maximum Ingest Quality** in the UI under side panel → Upload.
+
+    To preload image and audio models for faster multi-user parsing:
+
+    ```bash
+    python generate.py \
+      --pre_load_embedding_model=True \
+      --embedding_gpu_id=0 \
+      --pre_load_caption_model=True \
+      --caption_gpu_id=1 \
+      --doctr_gpu_id=2 \
+      --asr_gpu_id=3 \
+      --max_quality=True
+    ```
+  </Accordion>
+
+  <Accordion title="How does top_k_docs affect context quality?">
+    `--top_k_docs` controls how many document chunks fill the LLM context.
+
+    - Default: `3` (fast, lower quality)
+    - `--top_k_docs=10` — balanced for most use cases
+    - `--top_k_docs=-1` — autofill context (best quality, slower)
+
+    When using `--top_k_docs=-1`, you can bound token usage:
+
+    - `--max_input_tokens=3000` — cap per-call tokens
+    - `--max_total_input_tokens=16000` — cap total tokens across all calls
+
+    h2oGPT always manages truncation internally via `get_limited_prompt()`.
+  </Accordion>
+
+  <Accordion title="How do I set up the Text Embedding Inference (TEI) server?">
+    TEI provides faster embedding generation and better memory management. Start the server with Docker:
+
+    ```bash
+    docker run -d \
+      --gpus '"device=0"' \
+      --shm-size 3g \
+      -v $HOME/.cache/huggingface/hub/:/data \
+      -p 5555:80 \
+      --pull always \
+      ghcr.io/huggingface/text-embeddings-inference:1.2 \
+      --model-id BAAI/bge-large-en-v1.5 \
+      --max-client-batch-size=4096 \
+      --max-batch-tokens=2097152
+    ```
+
+    Then point h2oGPT at it:
+
+    ```bash
+    python generate.py --hf_embedding_model=tei:http://localhost:5555 --cut_distance=10000
+    ```
+
+    For smaller GPUs (e.g. Tesla T4), reduce the batch size to avoid `413 Payload Too Large` errors:
+
+    ```bash
+    TEI_MAX_BATCH_SIZE=128 python generate.py --hf_embedding_model=tei:http://localhost:5555 --cut_distance=10000
+    ```
+  </Accordion>
+
+  <Accordion title="How do I migrate a Chroma database from version < 0.4 to >= 0.4?">
+    Follow these steps:
+
+    ```bash
+    pip uninstall pydantic chromadb -y
+    pip install pydantic==1.10.15 chromadb==0.4.3 chroma-migrate --upgrade
+    chroma-migrate
+    ```
+
+    When prompted: choose **duckdb**, select the persistent directory (e.g. `db_dir_UserData`), and choose a new name like `db_dir_UserData_mig`.
+
+    After migration completes:
+
+    ```bash
+    cp db_dir_UserData/embed_info db_dir_UserData_mig/
+    mv db_dir_UserData db_dir_UserData_backup
+    mv db_dir_UserData_mig db_dir_UserData
+    ```
+
+    Then start h2oGPT as normal.
+  </Accordion>
+
+  <Accordion title="How do I use h2oGPT with non-English languages?">
+    You need to configure the LLM, embedding model, and prompts for the target language. Example for Chinese:
+
+    ```bash
+    python generate.py \
+      --cut_distance=10000 \
+      --hf_embedding_model=BAAI/bge-base-zh-v1.5 \
+      --base_model=HuggingFaceH4/zephyr-7b-beta \
+      --score_model=None \
+      --pre_prompt_query="注意并记住下面的信息，这将有助于在上下文结束后回答问题或祈使句。" \
+      --prompt_query="仅根据上述上下文中提供的文档来源中的信息，" \
+      --system_prompt="你是一个有用的纯中文语言助手，绝对只使用中文。"
+    ```
+
+    For multilingual embedding when no language-specific model is available:
+
+    ```bash
+    --hf_embedding_model=sentence-transformers/all-MiniLM-L12-v2
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## API & integration
+
+<AccordionGroup>
+  <Accordion title="How do I configure API key access?">
+    Enable key enforcement for both UI and API:
+
+    ```bash
+    python generate.py \
+      --base_model=h2oai/h2ogpt-4096-llama2-70b-chat \
+      --auth_filename=auth.json \
+      --enforce_h2ogpt_api_key=True \
+      --enforce_h2ogpt_ui_key=True \
+      --h2ogpt_api_keys="['<API_KEY>']"
+    ```
+
+    Or pass a JSON key file:
+
+    ```bash
+    --h2ogpt_api_keys="h2ogpt_api_keys.json"
+    ```
+
+    Where `h2ogpt_api_keys.json` is a JSON array of allowed key strings.
+  </Accordion>
+
+  <Accordion title="How do I connect to inference servers like vLLM, Ollama, or Anthropic?">
+    Pass the server address to `--inference_server`. Examples:
+
+    | Provider | Example value |
+    |---|---|
+    | Ollama | `vllm_chat:http://localhost:11434/v1/` |
+    | vLLM | `vllm:111.111.111.111:5005` |
+    | Anthropic Claude | `anthropic` (set `ANTHROPIC_API_KEY`) |
+    | OpenAI | `openai_chat` (set `OPENAI_API_KEY`) |
+    | Google Gemini | `google` (set `GOOGLE_API_KEY`) |
+    | Groq | `groq` (set `GROQ_API_KEY`) |
+    | MistralAI | `mistralai` |
+
+    Example for Anthropic Claude Opus:
+
+    ```bash
+    python generate.py \
+      --inference_server=anthropic \
+      --base_model=claude-3-opus-20240229
+    ```
+  </Accordion>
+
+  <Accordion title="How do I get JSON output or use guided generation?">
+    Pass `response_format` or guided generation parameters:
+
+    - `response_format=json_object` — best-effort JSON for any model
+    - `response_format=json_code` — JSON via code block extraction, works on most models
+    - `guided_json=<schema>` — strict schema enforcement (requires vLLM >= 0.4.0 or Anthropic Claude 3)
+    - `guided_regex`, `guided_choice`, `guided_grammar` — other constraint types (vLLM >= 0.4.0 only)
+
+    Example schema for `guided_json`:
+
+    ```python
+    guided_json = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer"},
+            "skills": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 10},
+                "minItems": 3
+            }
+        },
+        "required": ["name", "age", "skills"]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="How do I launch parallel OpenAI proxy or ingestion servers?">
+    **Parallel OpenAI proxy workers** (independent forks sharing the same IP/port):
+
+    ```bash
+    python generate.py --openai_server=True --openai_workers=2
+    ```
+
+    **Parallel ingestion workers** (keeps the main Gradio UI isolated from CPU-heavy parsing):
+
+    ```bash
+    python generate.py --function_server=True --function_server_workers=2
+    ```
+
+    FastAPI handles load balancing between workers via OS-level management.
+  </Accordion>
+
+  <Accordion title="How do I enable HTTPS for both server and client?">
+    Generate a self-signed certificate:
+
+    ```bash
+    openssl req -x509 -newkey rsa:4096 \
+      -keyout private_key.pem -out cert.pem \
+      -days 3650 -nodes -subj '/O=H2OGPT'
+    ```
+
+    Start h2oGPT with SSL:
+
+    ```bash
+    python generate.py \
+      --ssl_verify=False \
+      --ssl_keyfile=private_key.pem \
+      --ssl_certfile=cert.pem \
+      --share=False
+    ```
+
+    For the Gradio client, disable SSL verification using a context manager — see the full example in the [h2oGPT source FAQ](https://github.com/h2oai/h2ogpt/blob/main/docs/FAQ.md).
+  </Accordion>
+</AccordionGroup>
+
+## Performance & memory
+
+<AccordionGroup>
+  <Accordion title="How do I speed up ASR (automatic speech recognition)?">
+    Use `distil-whisper/distil-large-v3` for approximately 10× faster inference at similar accuracy:
+
+    ```bash
+    python generate.py --asr_model=distil-whisper/distil-large-v3
+    ```
+
+    For Whisper large-v2 or large-v3, install `faster_whisper` for approximately 4× faster and 2× lower memory usage.
+  </Accordion>
+
+  <Accordion title="How do I use attention sinks for very long outputs?">
+    Enable attention sinks to generate far beyond the model's normal context window:
+
+    ```bash
+    python generate.py \
+      --base_model=mistralai/Mistral-7B-Instruct-v0.2 \
+      --score_model=None \
+      --attention_sinks=True \
+      --max_new_tokens=100000 \
+      --max_max_new_tokens=100000 \
+      --top_k_docs=-1 \
+      --use_gpu_id=False \
+      --max_seq_len=8192 \
+      --sink_dict="{'num_sink_tokens': 4, 'window_length': 8192}"
+    ```
+
+    The `window_length` must be larger than any single prompt input. Set `--max_input_tokens` to the same value to enforce this.
+
+    <Warning>Attention sinks are not supported for llama.cpp models or vLLM/TGI inference servers.</Warning>
+  </Accordion>
+
+  <Accordion title="How do I throttle GPU power to prevent resets?">
+    Use `nvidia-smi` to set a lower power limit:
+
+    ```bash
+    sudo nvidia-smi -pl 250
+    ```
+
+    This sets each GPU to 250 W instead of 300 W.
+  </Accordion>
+
+  <Accordion title="What does the model name number (e.g. '512') mean?">
+    The number indicates the cutoff length in tokens used during fine-tuning. For example, `h2oai/h2ogpt-oasst1-512-20b` was trained with a cutoff of 512 tokens.
+
+    Shorter cutoffs result in faster training and more focus on the tail of the input. For fine-tuning your own data, a cutoff of 512 is reasonable for most instruction datasets.
+  </Accordion>
+
+  <Accordion title="Is h2oGPT multilingual?">
+    Yes. h2oGPT works in any language, though quality depends on the underlying model and embedding model.
+
+    For best results in non-English languages:
+    - Use a language-specific LLM (e.g. `LeoLM` for German, `JAIS` for Arabic)
+    - Use a matching embedding model (e.g. `BAAI/bge-base-zh-v1.5` for Chinese)
+    - Translate the query and summary prompts (`--pre_prompt_query`, `--prompt_summary`, etc.)
+    - Set a native-language system prompt via `--system_prompt`
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,188 @@
+---
+title: 'Supported models'
+description: 'Overview of all model families and formats supported by h2oGPT, including HuggingFace, GGUF, AutoGPTQ, AutoAWQ, and GPT4All.'
+---
+
+h2oGPT supports a wide range of open-source LLMs across multiple formats and quantization methods. You can run models locally on GPU or CPU, or connect to remote inference servers.
+
+## Model families
+
+<CardGroup cols={2}>
+  <Card title="LLaMa 2 / LLaMa 3" icon="cube">
+    Meta's open-weight models, from 7B to 70B parameters. Supported in full precision, 8-bit, 4-bit, AutoGPTQ, AutoAWQ, and GGUF formats.
+  </Card>
+  <Card title="Mistral / Mixtral" icon="bolt">
+    Mistral 7B and Mixtral 8×7B instruction-tuned variants. Supported via HuggingFace, vLLM, and the MistralAI inference API.
+  </Card>
+  <Card title="Falcon" icon="feather">
+    TII Falcon 7B, 40B, and instruct variants. Supported via HuggingFace Transformers and HF TGI server.
+  </Card>
+  <Card title="Zephyr" icon="zap">
+    HuggingFace H4 Zephyr models (e.g. `zephyr-7b-beta`). Recommended for production 7B usage with 8-bit loading.
+  </Card>
+  <Card title="Vicuna / WizardLM" icon="wand">
+    Instruction-tuned variants of LLaMa. Use `--prompt_type=instruct_vicuna` or `--prompt_type=wizard2` respectively.
+  </Card>
+  <Card title="Nous Hermes / OpenChat" icon="message-circle">
+    Community fine-tunes with strong instruction following. Use `--prompt_type=instruct` or the auto-detected chat template.
+  </Card>
+  <Card title="GPT4All / GGUF (CPU)" icon="cpu">
+    Quantized GGUF models via llama.cpp and GPT4All for CPU-only or low-memory environments.
+  </Card>
+  <Card title="AutoGPTQ / AutoAWQ" icon="layers">
+    4-bit quantized models for reduced GPU memory. AutoGPTQ uses GPTQ kernels; AutoAWQ uses activation-aware quantization.
+  </Card>
+</CardGroup>
+
+## `--base_model` and `--prompt_type`
+
+The two most important CLI flags for model loading are `--base_model` and `--prompt_type`.
+
+`--base_model` accepts:
+
+- A HuggingFace Hub model name, e.g. `HuggingFaceH4/zephyr-7b-beta`
+- A local filesystem path, e.g. `/path/to/my-model`
+- The special token `llama` to load a llama.cpp GGUF file
+- The special token `gptj` or `gpt4all_llama` for GPT4All models
+
+`--prompt_type` tells h2oGPT how to format prompts for the model. It must match the model's training format. Common values are:
+
+| Value | Used for |
+|---|---|
+| `llama2` | LLaMa-2 chat models |
+| `instruct` | Generic instruct-tuned models |
+| `instruct_vicuna` | Vicuna-style models |
+| `human_bot` | h2oGPT-trained models |
+| `zephyr` | Zephyr models |
+| `openai_chat` | OpenAI chat API or oLLaMa |
+| `plain` | No special formatting |
+
+For newer models (LLaMa-3, Gemma, etc.) that embed a HuggingFace chat template in `tokenizer_config.json`, h2oGPT auto-detects the template and you can omit `--prompt_type`.
+
+```bash
+# Newer models with built-in chat templates — no prompt_type needed
+python generate.py --base_model=meta-llama/Meta-Llama-3-8B-Instruct
+```
+
+If you download a model manually and point `--base_model` to a local path, you must specify `--prompt_type` explicitly:
+
+```bash
+python generate.py --base_model=/my/local/path --load_8bit=True --prompt_type=human_bot
+```
+
+<Tip>
+If `prompt_type` is not listed in `enums.py::PromptType`, you can pass a fully custom `--prompt_dict` to define your own prompt template.
+</Tip>
+
+## GGUF / llama.cpp models
+
+GGUF (quantized) models run via llama.cpp. Use `--base_model=llama` and supply the model path or URL via `--model_path_llama`:
+
+```bash
+# Download and run a GGUF model
+wget https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf
+python generate.py --base_model=llama --prompt_type=llama2 --score_model=None
+```
+
+For a remote URL, pass it directly:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/TheBloke/Llama-2-7b-Chat-GGUF/resolve/main/llama-2-7b-chat.Q6_K.gguf \
+  --score_model=None
+```
+
+To use an accurate HuggingFace chat template with a GGUF model (recommended for LLaMa-3), pass the HF tokenizer:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --model_path_llama=https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf \
+  --tokenizer_base_model=meta-llama/Meta-Llama-3-8B-Instruct \
+  --max_seq_len=8192
+```
+
+## AutoGPTQ models
+
+AutoGPTQ provides 4-bit quantized models with optional RoPE scaling for extended context. Pass `--load_gptq` with the model's weight file name:
+
+```bash
+python generate.py \
+  --base_model=TheBloke/Nous-Hermes-13B-GPTQ \
+  --score_model=None \
+  --load_gptq=model \
+  --use_safetensors=True \
+  --prompt_type=instruct
+```
+
+<Warning>
+If you see `CUDA extension not installed` during model loading, you need to recompile the AutoGPTQ CUDA kernels. Without recompilation, generation speed will be significantly slower even on GPU.
+</Warning>
+
+## AutoAWQ models
+
+AutoAWQ (activation-aware weight quantization) offers efficient 4-bit quantization with good quality. Use `--load_awq`:
+
+```bash
+python generate.py \
+  --base_model=TheBloke/Llama-2-13B-chat-AWQ \
+  --score_model=None \
+  --load_awq=model \
+  --use_safetensors=True \
+  --prompt_type=llama2
+```
+
+## GPT4All models
+
+GPT4All models are downloaded automatically at runtime into `.cache`:
+
+```bash
+# GPT-J based model
+python generate.py \
+  --base_model=gptj \
+  --model_path_gptj=ggml-gpt4all-j-v1.3-groovy.bin \
+  --score_model=None
+
+# LLaMa-based GPT4All model
+python generate.py \
+  --base_model=gpt4all_llama \
+  --model_name_gpt4all_llama=ggml-wizardLM-7B.q4_2.bin \
+  --score_model=None
+```
+
+<Note>
+The `gptj` GPT4All model sometimes produces no output. The `gpt4all_llama` variant is generally more reliable.
+</Note>
+
+## Model download and management via UI
+
+You do not have to specify models on the CLI. When h2oGPT is running, open the **Models** tab in the UI:
+
+1. Enter the HuggingFace model name (same as `--base_model`) in the base model field.
+2. Optionally enter a server URL for remote inference.
+3. Click **Add new Model, Lora, Server url:port**.
+4. Select the model in the dropdown and click **Load-Unload** to activate it.
+
+You can also enable **Compare Mode** to run two models side-by-side for bake-off evaluation.
+
+## Attention Sinks for long context
+
+h2oGPT supports [Attention Sinks](https://github.com/tomaarsen/attention_sinks) for arbitrarily long generation beyond a model's training context window. Supported architectures include LLaMa-2, Mistral, MPT, Pythia, and Falcon.
+
+For extended context with RoPE scaling using exllama:
+
+```bash
+python generate.py \
+  --base_model=TheBloke/Llama-2-7b-Chat-GPTQ \
+  --load_gptq=model \
+  --use_safetensors=True \
+  --prompt_type=llama2 \
+  --load_exllama=True \
+  --revision=gptq-4bit-32g-actorder_True \
+  --rope_scaling="{'alpha_value':4}"
+```
+
+<Warning>
+Setting `alpha_value` higher extends context but consumes substantially more GPU memory. With exllama, set `--concurrency_count=1` to avoid shared state across concurrent requests.
+</Warning>

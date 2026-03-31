@@ -1,0 +1,280 @@
+---
+title: "Vision and images"
+description: "Use vision models to understand images and documents, and generate images with Stable Diffusion, PlaygroundAI, and Flux."
+---
+
+h2oGPT supports two distinct image capabilities: **vision/VQA** (asking questions about existing images) and **image generation** (creating new images from text prompts). DocTR provides OCR for scanned PDFs and documents.
+
+## Vision models (VQA)
+
+Vision models accept both text and image inputs and return text answers.
+
+<CardGroup cols={2}>
+  <Card title="LLaVA" icon="eye">
+    Open-source, self-hostable. Versions include `llava-v1.6-vicuna-13b`, `llava-v1.6-34b`, and LLaVA-NeXT variants up to 110B parameters.
+  </Card>
+  <Card title="Claude 3" icon="cloud">
+    Anthropic's Claude 3 (Haiku, Sonnet, Opus) supports image inputs via the Anthropic inference server.
+  </Card>
+  <Card title="Gemini Pro Vision" icon="cloud">
+    Google's Gemini Pro Vision via the Google inference server.
+  </Card>
+  <Card title="GPT-4 Vision" icon="cloud">
+    OpenAI GPT-4V via the OpenAI or Azure OpenAI inference server.
+  </Card>
+</CardGroup>
+
+### Sending images via the UI
+
+<Steps>
+  <Step title="Select a vision-capable model">
+    In the **Models** tab, choose a vision model such as `liuhaotian/llava-v1.6-vicuna-13b` or configure a cloud model like `claude-3-opus-20240229`.
+  </Step>
+  <Step title="Upload an image">
+    Use the file upload area in the chat panel to attach an image. JPEG, PNG, WebP, and other common formats are accepted.
+  </Step>
+  <Step title="Ask a question">
+    Type your question and click **Submit**. The model receives both the image and the text.
+  </Step>
+</Steps>
+
+### Sending images via the OpenAI API
+
+h2oGPT's OpenAI-compatible proxy server accepts the same `image_url` content type used by GPT-4V:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:5000/v1")
+
+response = client.chat.completions.create(
+    model="liuhaotian/llava-v1.6-vicuna-13b",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe what you see in this image."},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/image.jpg"
+                    }
+                }
+            ]
+        }
+    ]
+)
+print(response.choices[0].message.content)
+```
+
+You can also pass a base64-encoded image:
+
+```python
+import base64
+
+with open("image.png", "rb") as f:
+    b64 = base64.b64encode(f.read()).decode()
+
+response = client.chat.completions.create(
+    model="liuhaotian/llava-v1.6-vicuna-13b",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What is in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"}
+                }
+            ]
+        }
+    ]
+)
+```
+
+### Self-hosting LLaVA
+
+LLaVA requires its own Python environment. Start the controller, one or more model workers, and the Gradio server:
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.1
+conda create -n llava python=3.10 -y
+conda activate llava
+
+git clone https://github.com/h2oai/LLaVA.git h2oai_llava
+cd h2oai_llava
+pip install -e .
+pip install torch==2.1.2 torchvision==0.16.2 flash-attn==2.5.2 --no-build-isolation
+```
+
+```bash
+# Terminal 1 — controller
+export server_port=10000
+python -m llava.serve.controller --host 0.0.0.0 --port $server_port
+
+# Terminal 2 — 13B worker
+python -m llava.serve.model_worker \
+  --host 0.0.0.0 \
+  --controller http://localhost:$server_port \
+  --port 40000 \
+  --worker http://localhost:40000 \
+  --model-path liuhaotian/llava-v1.6-vicuna-13b
+
+# Terminal 3 — Gradio front-end for LLaVA
+export GRADIO_SERVER_PORT=7861
+python -m llava.serve.gradio_web_server \
+  --controller http://localhost:$server_port \
+  --model-list-mode once
+```
+
+Then start h2oGPT pointing at the LLaVA server:
+
+```bash
+export GRADIO_SERVER_PORT=7860
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --score_model=None \
+  --llava_model=http://localhost:7861:llava-v1.6-vicuna-13b \
+  --visible_image_models="['sdxl_turbo']" \
+  --image_gpu_ids="[0]"
+```
+
+The `--llava_model` flag takes the format `<IP>:<port>:<model_name>`. The model name portion is optional; h2oGPT uses the first model registered with the controller if omitted.
+
+### Using LMDeploy for faster inference
+
+LMDeploy provides faster and more reliable serving for LLaVA and InternVL models:
+
+```bash
+docker build - < docs/Dockerfile.internvl -t internvl
+
+docker run -d --runtime nvidia --gpus '"device=0"' \
+  -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+  -p 23333:23333 \
+  --ipc=host \
+  --name internvl-chat-v1-5_lmdeploy \
+  internvl \
+  lmdeploy serve api_server OpenGVLab/InternVL-Chat-V1-5 \
+    --model-name OpenGVLab/InternVL-Chat-V1-5
+```
+
+```bash
+python generate.py \
+  --base_model=OpenGVLab/InternVL-Chat-V1-5 \
+  --inference_server='vllm_chat:http://0.0.0.0:23333/v1'
+```
+
+## Image generation
+
+h2oGPT can generate images from text prompts using Stable Diffusion, PlaygroundAI, and Flux models.
+
+### Supported image generation models
+
+| Model | Key | Description |
+|-------|-----|-------------|
+| SDXL Turbo | `sdxl_turbo` | Fast, lower-resolution generation. Good for quick previews. |
+| SDXL | `sdxl` | Higher quality than Turbo at the cost of speed. |
+| Stable Diffusion 3 | `sd3` | State-of-the-art quality from Stability AI. |
+| PlaygroundAI v2 | `playv2` | High-resolution output with vibrant aesthetics. |
+| Flux | `flux` | Newer model family with strong prompt adherence. |
+
+### Enabling image generation
+
+```bash
+# Fast generation with sdxl_turbo
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --score_model=None \
+  --enable_image=True \
+  --visible_image_models="['sdxl_turbo']" \
+  --image_gpu_ids="[0]"
+```
+
+```bash
+# High-resolution generation with PlaygroundAI
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --score_model=None \
+  --enable_image=True \
+  --visible_image_models="['playv2']" \
+  --image_gpu_ids="[0]"
+```
+
+```bash
+# Multiple models on separate GPUs
+python generate.py \
+  --base_model=HuggingFaceH4/zephyr-7b-beta \
+  --score_model=None \
+  --enable_image=True \
+  --visible_image_models="['sdxl_turbo', 'sdxl', 'playv2']" \
+  --image_gpu_ids="[0,1,2]"
+```
+
+<Warning>
+  Each image model occupies a separate GPU. Assigning multiple models to a single GPU may cause out-of-memory errors for larger models like SDXL or SD3.
+</Warning>
+
+### Image generation via the OpenAI API
+
+h2oGPT exposes an OpenAI-compatible image generation endpoint:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:5000/v1")
+
+response = client.images.generate(
+    model="sdxl_turbo",
+    prompt="A photorealistic mountain landscape at sunrise",
+    n=1,
+    size="512x512"
+)
+print(response.data[0].url)
+```
+
+### Image generation flags
+
+| Flag | Description |
+|------|-------------|
+| `--enable_image` | Enable the image generation subsystem. Default: `False`. |
+| `--visible_image_models` | List of model keys to expose in the UI, e.g. `"['sdxl_turbo', 'playv2']"`. |
+| `--image_gpu_ids` | GPU indices for each image model, e.g. `"[0,1]"`. Must match the length of `--visible_image_models`. |
+
+## DocTR for OCR
+
+DocTR converts scanned PDFs and images into machine-readable text by running a neural OCR pipeline over each page.
+
+Enable DocTR for PDF ingestion:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --enable_pdf_doctr=on \
+  --doctr_gpu_id=0
+```
+
+For a full multi-GPU setup with DocTR, a caption model, and ASR:
+
+```bash
+python generate.py \
+  --base_model=llama \
+  --pre_load_image_audio_models=True \
+  --caption_gpu_id=1 \
+  --captions_model=microsoft/Florence-2-large \
+  --enable_pdf_doctr=on \
+  --doctr_gpu_id=2 \
+  --asr_gpu_id=3 \
+  --asr_model=openai/whisper-large-v3
+```
+
+<Note>
+  Using `--enable_pdf_doctr=on` is slower for long PDFs because it rasterizes each page to an image first. The benefit is that it handles scanned or image-only PDFs that text-based extractors cannot read.
+</Note>
+
+DocTR is also used automatically when you upload a zip file containing images to the UI via the function server:
+
+```bash
+python generate.py \
+  --function_server=True \
+  --function_server_workers=2
+```

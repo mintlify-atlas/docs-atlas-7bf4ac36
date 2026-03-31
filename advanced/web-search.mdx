@@ -1,0 +1,93 @@
+---
+title: 'Web search'
+description: 'Augment h2oGPT responses with live web results using SerpAPI or DuckDuckGo search integration.'
+---
+
+h2oGPT can augment LLM context with live web search results. Queries are sent to a search provider and the results are injected into the prompt before the LLM responds. This is useful for questions about recent events or information not present in your document collections.
+
+The default search provider is **DuckDuckGo** (no API key required). You can upgrade to **SerpAPI** for higher reliability and more results.
+
+## Install search dependencies
+
+```bash
+pip install -r reqs_optional/requirements_optional_agents.txt
+```
+
+## SerpAPI setup
+
+SerpAPI provides structured search results. Free accounts include a limited number of searches per month.
+
+<Steps>
+  <Step title="Create a SerpAPI account">
+    Sign up at [serpapi.com](https://serpapi.com/). Free accounts include a quota of searches at no cost.
+  </Step>
+  <Step title="Copy your API key">
+    After signing in, find your API key on the dashboard.
+  </Step>
+  <Step title="Set the environment variable">
+    Export the key before starting h2oGPT:
+
+    ```bash
+    export SERPAPI_API_KEY=your_api_key_here
+    ```
+
+    To make this persistent, add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+  </Step>
+  <Step title="Start h2oGPT">
+    ```bash
+    python generate.py --base_model=h2oai/h2ogpt-4096-llama2-7b-chat
+    ```
+
+    h2oGPT detects the `SERPAPI_API_KEY` variable and enables SerpAPI automatically.
+  </Step>
+</Steps>
+
+## DuckDuckGo fallback
+
+If `SERPAPI_API_KEY` is not set, h2oGPT falls back to DuckDuckGo search. No API key or account is required.
+
+<Note>
+  DuckDuckGo is the default search backend. SerpAPI is preferred for production use due to more consistent result quality and structured output.
+</Note>
+
+## Enabling web search per query in the UI
+
+Once h2oGPT is running with search configured:
+
+<Steps>
+  <Step title="Open the Resources panel">
+    In the Gradio UI, expand the **Resources** section.
+  </Step>
+  <Step title="Enable web search">
+    You will see a **web search** toggle. Enable it to include search results in the next response.
+  </Step>
+  <Step title="Use the Search agent">
+    If `SERPAPI_API_KEY` is set, a **SEARCH** agent also appears under **Resources → Agents**. This agent actively uses search as a tool during reasoning, not just as a one-shot context injection.
+  </Step>
+</Steps>
+
+<Warning>
+  The Search agent is highly experimental and works best with OpenAI models. Results with open-source models may be inconsistent.
+</Warning>
+
+## How it works
+
+When web search is enabled for a query, h2oGPT:
+
+1. Sends the user's question to the search provider (SerpAPI or DuckDuckGo)
+2. Retrieves the top results
+3. Injects the result snippets into the LLM's context window alongside the original question
+4. The LLM generates a response informed by both its training data and the live search results
+
+This is distinct from the document Q&A pipeline — search results are fetched in real time and are not stored in the persistent vector database.
+
+## Configuration reference
+
+| Parameter | Description |
+|---|---|
+| `SERPAPI_API_KEY` | Environment variable. When set, enables SerpAPI as the search backend. |
+| `--enable_serpapi` | CLI flag to explicitly enable or disable SerpAPI (requires key in env). |
+
+<Tip>
+  For research workflows that combine web search with document Q&A, enable both web search and a LangChain collection in the UI. The LLM will have access to both your uploaded documents and live search results.
+</Tip>
